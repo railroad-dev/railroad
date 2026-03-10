@@ -76,9 +76,6 @@ impl HookOutput {
 pub struct Policy {
     #[serde(default = "default_version")]
     pub version: u32,
-    /// "hardcore" (default) or "chill"
-    #[serde(default = "default_mode")]
-    pub mode: String,
     #[serde(default)]
     pub blocklist: Vec<Rule>,
     #[serde(default)]
@@ -91,10 +88,6 @@ pub struct Policy {
     pub trace: TraceConfig,
     #[serde(default)]
     pub snapshot: SnapshotConfig,
-}
-
-fn default_mode() -> String {
-    "hardcore".to_string()
 }
 
 fn default_version() -> u32 {

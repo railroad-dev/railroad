@@ -50,36 +50,52 @@ pub fn load_policy_or_defaults(cwd: &Path) -> Policy {
     }
 }
 
-/// Merge user policy with built-in defaults based on mode.
-/// Built-in blocklist rules are always prepended — users can override with allowlist.
+/// Merge user policy with built-in defaults.
+/// Built-in rules are always prepended — users can override with allowlist.
+/// Rules are split by action: "block" → blocklist, "approve" → approve list.
 fn merge_with_defaults(mut policy: Policy) -> Policy {
-    let defaults = crate::policy::defaults::default_blocklist_for_mode(&policy.mode);
-    let user_rule_names: std::collections::HashSet<String> =
-        policy.blocklist.iter().map(|r| r.name.clone()).collect();
+    let defaults = crate::policy::defaults::default_blocklist();
 
-    // Prepend default rules that aren't overridden by user
-    let mut merged = defaults
-        .into_iter()
-        .filter(|r| !user_rule_names.contains(&r.name))
-        .collect::<Vec<_>>();
-    merged.append(&mut policy.blocklist);
-    policy.blocklist = merged;
+    let user_rule_names: std::collections::HashSet<String> = policy
+        .blocklist
+        .iter()
+        .chain(policy.approve.iter())
+        .map(|r| r.name.clone())
+        .collect();
 
-    // In chill mode, disable fence by default (unless user explicitly enabled it)
-    if policy.mode == "chill" && policy.fence.denied_paths.is_empty() && policy.fence.allowed_paths.is_empty() {
-        policy.fence.enabled = false;
+    // Split defaults by action, excluding user-overridden rules
+    let mut default_block = Vec::new();
+    let mut default_approve = Vec::new();
+    for rule in defaults {
+        if user_rule_names.contains(&rule.name) {
+            continue;
+        }
+        if rule.action == "approve" {
+            default_approve.push(rule);
+        } else {
+            default_block.push(rule);
+        }
     }
+
+    // Prepend defaults before user rules
+    default_block.append(&mut policy.blocklist);
+    policy.blocklist = default_block;
+
+    default_approve.append(&mut policy.approve);
+    policy.approve = default_approve;
 
     policy
 }
 
-/// Default policy with built-in blocklist (hardcore mode).
+/// Default policy with built-in rules.
 pub fn default_policy() -> Policy {
+    let all_rules = crate::policy::defaults::default_blocklist();
+    let (approve, blocklist): (Vec<_>, Vec<_>) =
+        all_rules.into_iter().partition(|r| r.action == "approve");
     Policy {
         version: 1,
-        mode: "hardcore".to_string(),
-        blocklist: crate::policy::defaults::hardcore_blocklist(),
-        approve: vec![],
+        blocklist,
+        approve,
         allowlist: vec![],
         fence: Default::default(),
         trace: Default::default(),
@@ -111,8 +127,6 @@ mod tests {
     fn test_load_default_policy() {
         let policy = default_policy();
         assert!(!policy.blocklist.is_empty());
-        assert_eq!(policy.mode, "hardcore");
-        // Hardcore mode: fence is on by default
         assert!(policy.fence.enabled);
         assert!(policy.trace.enabled);
         assert!(policy.snapshot.enabled);

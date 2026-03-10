@@ -126,7 +126,7 @@ pub fn generate_profile(config: &FenceConfig, cwd: &str) -> String {
     }
     profile.push('\n');
 
-    // Network: deny by default in hardcore mode
+    // Network: deny by default
     profile.push_str(";; Network policy (deny by default, allow specific)\n");
     profile.push_str("(deny network*)\n");
     profile.push_str("(allow network-outbound (remote tcp \"*:443\"))\n");

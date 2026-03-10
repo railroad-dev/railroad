@@ -77,7 +77,8 @@ fn make_write_input(session_id: &str, cwd: &str, file_path: &str) -> String {
 }
 
 fn output_contains_deny(stdout: &str) -> bool {
-    stdout.contains("\"deny\"") || stdout.contains("permissionDecision")
+    // Matches both "deny" (block) and "ask" (approve) — both prevent unattended execution
+    stdout.contains("\"deny\"") || stdout.contains("\"ask\"") || stdout.contains("permissionDecision")
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -420,7 +421,10 @@ fn trace_logs_blocked_commands() {
     assert!(trace_file.exists());
 
     let content = std::fs::read_to_string(&trace_file).unwrap();
-    assert!(content.contains("\"decision\":\"block\""), "trace should log blocked decision");
+    assert!(
+        content.contains("\"decision\":\"block\"") || content.contains("\"decision\":\"approve\""),
+        "trace should log blocked/approve decision: {}", content
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════

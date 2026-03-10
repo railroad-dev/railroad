@@ -39,7 +39,7 @@ fn main() -> ExitCode {
     let cwd = env::current_dir().unwrap_or_else(|_| Path::new("/").to_path_buf());
     let policy = load_policy_or_defaults(&cwd);
 
-    // If fence is disabled (chill mode without explicit fence), skip sandbox
+    // If fence is disabled, skip sandbox
     if !policy.fence.enabled {
         return exec_bare_command(&command_str);
     }

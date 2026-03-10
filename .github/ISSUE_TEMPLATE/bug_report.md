@@ -21,7 +21,7 @@ Steps to reproduce:
 - OS: [e.g., macOS 15, Ubuntu 24.04]
 - Railyard version: [e.g., 0.1.0]
 - Claude Code version: [e.g., 1.x]
-- Mode: [chill / hardcore]
+- Config: [default / custom railyard.yaml]
 
 **Logs**
 Paste any relevant output from `railyard log` or `railyard status`.

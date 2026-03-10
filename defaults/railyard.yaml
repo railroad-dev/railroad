@@ -10,47 +10,49 @@ version: 1
 # Commands matching these patterns are blocked immediately.
 # The agent receives the message and must find an alternative approach.
 
-blocklist:
+blocklist: []
+
+# ── Approve ──────────────────────────────────────────────────────────
+# Commands matching these patterns pause for human approval.
+# Destructive commands use "approve" by default — you decide.
+
+approve:
   - name: terraform-destroy
     tool: Bash
     pattern: "terraform\\s+(destroy|apply\\s+.*-auto-approve)"
-    action: block
-    message: "Blocked: terraform destroy is a destructive infrastructure command"
+    action: approve
+    message: "terraform destroy requires approval"
 
   - name: rm-rf-critical
     tool: Bash
     pattern: "rm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+|--force\\s+).*(/\\s*$|/\\*|~/|\\$HOME|/home)"
-    action: block
-    message: "Blocked: recursive force delete of critical path"
+    action: approve
+    message: "recursive force delete requires approval"
 
   - name: sql-drop
     tool: Bash
     pattern: "(?i)(DROP\\s+(TABLE|DATABASE|SCHEMA)|TRUNCATE\\s+TABLE)"
-    action: block
-    message: "Blocked: destructive SQL operation"
+    action: approve
+    message: "destructive SQL operation requires approval"
 
   - name: git-force-push
     tool: Bash
     pattern: "git\\s+push\\s+.*--force"
-    action: block
-    message: "Blocked: force push can overwrite remote history"
+    action: approve
+    message: "force push requires approval"
 
   - name: git-reset-hard
     tool: Bash
     pattern: "git\\s+reset\\s+--hard"
-    action: block
-    message: "Blocked: hard reset discards uncommitted work"
+    action: approve
+    message: "hard reset requires approval"
 
   - name: drizzle-force
     tool: Bash
     pattern: "drizzle-kit\\s+push\\s+--force"
-    action: block
-    message: "Blocked: drizzle-kit push --force can destroy database schema"
+    action: approve
+    message: "drizzle-kit push --force requires approval"
 
-# ── Approve ──────────────────────────────────────────────────────────
-# Commands matching these patterns pause for human approval.
-
-approve:
   - name: npm-publish
     tool: Bash
     pattern: "npm\\s+publish"

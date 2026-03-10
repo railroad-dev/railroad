@@ -27,10 +27,10 @@ pub fn evaluate(
         }
     }
 
-    // 2. Check blocklist
+    // 2. Check blocklist (handles both block and approve actions)
     if !policy.blocklist.is_empty() {
         let decision = evaluate_tool(tool_name, tool_input, &policy.blocklist);
-        if let Decision::Block { .. } = &decision {
+        if matches!(&decision, Decision::Block { .. } | Decision::Approve { .. }) {
             return decision;
         }
     }
@@ -56,7 +56,6 @@ mod tests {
     fn test_policy() -> Policy {
         Policy {
             version: 1,
-            mode: "chill".to_string(),
             blocklist: vec![Rule {
                 name: "no-destroy".to_string(),
                 tool: "Bash".to_string(),

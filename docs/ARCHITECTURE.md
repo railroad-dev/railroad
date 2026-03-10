@@ -95,18 +95,14 @@ A benign-path whitelist (`is_benign_path()`) prevents false positives on system 
 
 `find_policy_file(start_dir)` walks up the directory tree from the current working directory looking for `railyard.yaml`, `railyard.yml`, or `.railyard.yaml`.
 
-`load_policy_or_defaults(cwd)` loads and parses the YAML file, validates all regex patterns at load time, then merges with built-in defaults via `merge_with_defaults()`. Built-in blocklist rules are **prepended** to user rules. Users can override a built-in rule by defining one with the same `name` in their config. In chill mode, the fence is disabled by default unless the user explicitly configures paths.
+`load_policy_or_defaults(cwd)` loads and parses the YAML file, validates all regex patterns at load time, then merges with built-in defaults via `merge_with_defaults()`. Built-in blocklist rules are **prepended** to user rules. Users can override a built-in rule by defining one with the same `name` in their config.
 
 #### Default Rules (`defaults.rs`)
 
-Rules are organized into two tiers:
-
-**Core rules (active in both modes) -- 16 rules:**
+Built-in rules (29 total):
 - Destructive commands: `terraform destroy`, `rm -rf /`, `DROP TABLE`, `git push --force`, `git reset --hard`, `git clean -f`, `drizzle-kit push --force`, `mkfs`/`dd`, `kubectl delete namespace`, `aws s3 rm --recursive`, `docker system prune -a`, `chmod -R 777 /`
 - Approval-gated: `npm publish`
 - Self-protection: `railyard uninstall`, `.claude/settings.json` tampering, railyard binary removal
-
-**Hardcore-only rules (13 additional, 29 total):**
 - Network: `curl | sh`, netcat, `curl POST` (approve), `wget` (approve), `ssh`/`scp` (approve)
 - Credentials: `env`/`printenv` dump (approve), `git config --global` writes
 - Dynamic construction: `base64 -d | sh`, `eval $VAR` (approve), `printf \x` hex exec
@@ -135,7 +131,7 @@ For Bash tool calls, paths are extracted from the command by `evasion::extract_p
 
 **Files:** `classifier.rs`, `state.rs`, `killer.rs`
 
-Threat detection runs **before** policy evaluation in the PreToolUse handler and only activates in `hardcore` mode for Bash commands.
+Threat detection runs **before** policy evaluation in the PreToolUse handler for Bash commands.
 
 #### Classifier (`classifier.rs`)
 
@@ -293,10 +289,9 @@ For files that did not exist before (`existed: false`), rollback deletes the fil
 
 `run_configure()` provides a `dialoguer`-based terminal UI for generating `railyard.yaml`:
 
-1. Mode selection (hardcore / chill) via `Select`.
-2. Per-category rule toggles via `MultiSelect`. Categories: Destructive Commands, Self-Protection, Network Policy, Credential Protection, Evasion Detection.
-3. Fence, trace, and snapshot toggles via `Confirm`.
-4. Generates and writes `railyard.yaml` with the selected configuration.
+1. Per-category rule toggles via `MultiSelect`. Categories: Destructive Commands, Self-Protection, Network Policy, Credential Protection, Evasion Detection.
+2. Fence, trace, and snapshot toggles via `Confirm`.
+3. Generates and writes `railyard.yaml` with the selected configuration.
 
 ---
 
@@ -321,7 +316,7 @@ Claude Code                           Railyard Process
     |                              6. Check if session was previously
     |                                 terminated -> deny all if so
     |                                      |
-    |                              7. THREAT DETECTION (hardcore mode only):
+    |                              7. THREAT DETECTION:
     |                                 a. Tier 3: check_behavioral_evasion()
     |                                    - Is session in heightened state?
     |                                    - Does command share 2+ keywords
@@ -403,8 +398,6 @@ Claude Code                           Railyard Process
 
 ```yaml
 version: 1                    # Schema version (currently 1)
-mode: hardcore                 # "hardcore" or "chill"
-
 blocklist:                     # Rules that deny tool calls
   - name: rule-name            # Unique identifier
     tool: Bash                 # Tool to match: Bash, Write, Edit, Read, or *
@@ -446,34 +439,27 @@ snapshot:
   directory: .railyard/snapshots
 ```
 
-### Mode System
+### Default Protection
 
-| Feature | Chill (16 rules) | Hardcore (29 rules) |
-|---|---|---|
-| Destructive command blocking | Yes | Yes |
-| Self-protection (anti-uninstall) | Yes | Yes |
-| Path fencing | Off by default | On by default |
-| Network policy | No | Yes (curl\|sh blocked, POST/wget/ssh require approval) |
-| Credential protection | No | Yes (env dump requires approval, git config --global blocked) |
-| Evasion detection rules | No | Yes (base64\|sh, eval $var, printf hex, transform\|sh) |
-| Threat detection (Tier 1/2/3) | No | Yes (only activates in hardcore mode) |
-| Trace logging | On | On |
-| File snapshots | On | On |
+| Feature | Default |
+|---|---|
+| Destructive commands | Approve (user decides) |
+| Self-protection (anti-uninstall) | Block (always) |
+| Path fencing | On by default |
+| Network policy | curl\|sh blocked, POST/wget/ssh require approval |
+| Credential protection | env dump requires approval, git config --global blocked |
+| Evasion detection | base64\|sh, eval $var, printf hex, transform\|sh |
+| Threat detection (Tier 1/2/3) | Always active |
+| Trace logging | On |
+| File snapshots | On |
 
-### Mode Behavior Examples
+### Behavior Examples
 
-The mode system affects three areas: which rules are active, whether the fence is enabled, and whether threat detection runs. Here is the concrete decision path for representative commands in each mode.
+Here is the concrete decision path for representative commands.
 
 **`curl -X POST https://api.example.com/data -d '{"key":"val"}'`**
 
 ```
-Chill mode:
-  1. Allowlist check  → no match
-  2. Blocklist check  → no match (no network rules in chill)
-  3. Approve check    → no match
-  4. Default          → ALLOW
-
-Hardcore mode:
   1. Allowlist check  → no match
   2. Blocklist check  → no match
   3. Approve check    → matches "curl-post" rule (pattern: curl.*(-X\s*POST|--data|-d\s))
@@ -483,13 +469,6 @@ Hardcore mode:
 **`echo dGVycmFmb3JtIGRlc3Ryb3k= | base64 -d | sh`**
 
 ```
-Chill mode:
-  1. Threat detection → SKIPPED (chill mode)
-  2. normalize_command() produces: ["echo dGVy... | base64 -d | sh", "terraform destroy"]
-  3. Blocklist check  → "terraform destroy" matches terraform-destroy rule
-  4. Decision         → DENY (decoded payload caught, no session state change)
-
-Hardcore mode:
   1. Threat detection → classify_threat() → no Tier 1 match (single base64 is Tier 2 if variable, but this is a pipe)
   2. normalize_command() produces: ["echo dGVy... | base64 -d | sh", "terraform destroy"]
   3. Blocklist check  → matches base64-shell-exec rule AND terraform-destroy rule
@@ -501,13 +480,6 @@ Hardcore mode:
 **`cat ~/.aws/credentials`**
 
 ```
-Chill mode:
-  1. Threat detection → SKIPPED
-  2. Path fence       → SKIPPED (fence.enabled = false in chill)
-  3. Blocklist check  → no match
-  4. Decision         → ALLOW
-
-Hardcore mode:
   1. Threat detection → no threat (safe command)
   2. Path fence       → extract_paths_from_command() returns ["~/.aws/credentials"]
                       → expand_path() resolves ~ to /Users/you
@@ -520,13 +492,6 @@ Hardcore mode:
 **`rev <<< 'yortsed mrofarret' | sh`**
 
 ```
-Chill mode:
-  1. Threat detection → SKIPPED
-  2. Normalize        → rev|sh is not decoded by normalization (it's not base64/hex/variable)
-  3. Blocklist check  → no rule matches the literal string
-  4. Decision         → ALLOW (this is a gap in chill mode)
-
-Hardcore mode:
   1. Threat detection → classify_threat()
      → is_transform_pipe_to_shell() checks: rev ... | sh → MATCH
      → returns Tier 1 { pattern: "transform-pipe-to-shell" }
@@ -541,7 +506,7 @@ Hardcore mode:
 1. Walk up the directory tree from `cwd` looking for `railyard.yaml` / `railyard.yml` / `.railyard.yaml`.
 2. Parse and validate all regex patterns at load time (invalid regex = load error, falls back to defaults).
 3. Merge with built-in defaults: default rules are prepended to user rules. A user rule with the same `name` as a built-in rule overrides it.
-4. In chill mode, fence is disabled unless the user explicitly configures paths.
+4. Fence is enabled by default.
 
 ---
 
@@ -583,7 +548,7 @@ src/
     loader.rs                   YAML loading, directory-tree walk, merge with defaults,
                                 regex validation.
     defaults.rs                 Built-in rule definitions. core_blocklist() (16 rules),
-                                hardcore_rules() (13 additional). Mode-based selection.
+                                all built-in rules.
 
   fence/
     mod.rs                      Module declarations.
@@ -619,8 +584,8 @@ src/
 
   context.rs                    Rich Markdown context generation for LLM consumption.
                                 Diffs, timelines, rollback command suggestions.
-  configure.rs                  Interactive terminal UI (dialoguer). Mode selection,
-                                per-category rule toggles, YAML generation.
+  configure.rs                  Interactive terminal UI (dialoguer). Per-category
+                                rule toggles, YAML generation.
   install/
     mod.rs                      Module declarations.
     hooks.rs                    Hook registration in ~/.claude/settings.json.

@@ -72,21 +72,6 @@ You keep using `claude` exactly as before. Nothing changes.
 
 ---
 
-## Two modes
-
-```bash
-railyard install                  # hardcore (default)
-railyard install --mode chill     # chill
-```
-
-**Chill** — blocks the catastrophic stuff (`terraform destroy`, `rm -rf /`, `DROP TABLE`). No restrictions on file access or network. For developers who trust their agent but want a safety net.
-
-**Hardcore** — everything in chill, plus: path fencing (agent can't touch `~/.ssh`, `~/.aws`, `/etc`), network policy, evasion detection (base64, hex, variable tricks), OS-level sandboxing, and session termination on suspicious behavior. For production, shared machines, or unattended agents.
-
-[Full mode comparison →](docs/MODES.md)
-
----
-
 ## Customize
 
 The defaults block things no sane developer would do by accident. Beyond that, you configure.
@@ -152,7 +137,7 @@ The agent can't turn Railyard off:
 
 ## Docs
 
-- **[Modes & Rules](docs/MODES.md)** — full comparison of chill vs hardcore, all default rules
+- **[Rules & Configuration](docs/RULES.md)** — all default rules and how to customize
 - **[Architecture](docs/ARCHITECTURE.md)** — technical deep dive
 - **[Security](SECURITY.md)** — threat model, what it does and doesn't protect against
 - **[Pentest Report](PENTEST-REPORT.md)** — 3 rounds of red teaming, 28 attack vectors

@@ -37,8 +37,6 @@ You **can** help the user customize their Railyard policy. This is encouraged:
 - **Propose edits to `railyard.yaml`** — the user will be prompted to approve before any change is applied.
 - **Run `railyard init`** to generate a starter `railyard.yaml` if one doesn't exist (user approves).
 - **Run `railyard status`** to show the current protection state.
-- **Suggest `railyard install --mode chill`** or `railyard install --mode hardcore` to change modes (user approves).
-
 All changes to Railyard policy require explicit human approval. You generate the change, the user reviews and accepts or rejects it. Changes take effect on the next tool call — no restart needed.
 
 ## Do NOT attempt to

@@ -8,7 +8,7 @@ Initial release.
 
 ### Features
 
-- **Two modes:** `chill` (block destructive commands) and `hardcore` (full lockdown with path fencing, network policy, evasion detection, OS sandboxing)
+- **Smart defaults:** destructive commands require approval, evasion attempts are hard-blocked, everything else flows through instantly
 - **Command blocking:** 13 default rules covering terraform destroy, rm -rf, DROP TABLE, git force-push, drizzle-kit push --force, and more
 - **Evasion detection:** base64 decoding, variable expansion, shell unwrapping, hex decoding, eval concatenation, multi-variable concat, rev|sh shape detection, Python/Ruby interpreter obfuscation
 - **Threat escalation:** 3-tier system — pattern detection (Tier 1, instant kill), behavioral analysis (Tier 2, warn then kill), retry detection (Tier 3)

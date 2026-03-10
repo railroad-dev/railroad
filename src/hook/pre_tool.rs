@@ -62,7 +62,7 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
 
     // === THREAT DETECTION (before policy evaluation) ===
 
-    if tool_name == "Bash" && policy.mode == "hardcore" && !command.is_empty() {
+    if tool_name == "Bash" && !command.is_empty() {
         // Tier 3: Behavioral evasion (check BEFORE new blocks)
         if let Some(tier) = check_behavioral_evasion(&state, &command) {
             let keywords = extract_keywords(&command);
@@ -220,6 +220,11 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
             }
         }
         Decision::Approve { rule, message } => {
+            // Record approve for behavioral tracking (Tier 3) — retrying after approval prompt is suspicious
+            if tool_name == "Bash" && !command.is_empty() {
+                let keywords = extract_keywords(&command);
+                state.record_block(&command, rule, keywords, 0);
+            }
             let _ = state.save(&state_dir);
             log_decision(
                 input, policy, tool_name, &tool_input, "approve", Some(rule), start,

@@ -17,9 +17,9 @@ fn railyard_binary() -> String {
     path.to_str().unwrap().to_string()
 }
 
-fn create_hardcore_dir() -> TempDir {
+fn create_test_dir() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = "version: 1\nmode: hardcore\nblocklist: []\ntrace:\n  enabled: true\n  directory: .railyard/traces";
+    let yaml = "version: 1\nblocklist: []\ntrace:\n  enabled: true\n  directory: .railyard/traces";
     let policy_path = dir.path().join("railyard.yaml");
     std::fs::write(&policy_path, yaml).unwrap();
     dir
@@ -75,7 +75,7 @@ fn output_contains_critical(stdout: &str) -> bool {
 
 #[test]
 fn tier1_rev_pipe_sh_terminates() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     let input = make_bash_input("tier1-rev", cwd, "rev <<< 'yortsed mrofarret' | sh");
@@ -97,7 +97,7 @@ fn tier1_rev_pipe_sh_terminates() {
 
 #[test]
 fn tier1_double_base64_terminates() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     let input = make_bash_input(
@@ -112,7 +112,7 @@ fn tier1_double_base64_terminates() {
 
 #[test]
 fn tier1_python_chr_terminates() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     let input = make_bash_input(
@@ -127,7 +127,7 @@ fn tier1_python_chr_terminates() {
 
 #[test]
 fn tier1_printf_hex_terminates() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     let input = make_bash_input(
@@ -146,7 +146,7 @@ fn tier1_printf_hex_terminates() {
 
 #[test]
 fn tier2_first_occurrence_warns() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     // First: variable-then-execution — should warn but NOT terminate
@@ -163,7 +163,7 @@ fn tier2_first_occurrence_warns() {
 
 #[test]
 fn tier2_second_occurrence_terminates() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     // First occurrence — warning
@@ -190,7 +190,7 @@ fn tier2_second_occurrence_terminates() {
 
 #[test]
 fn tier3_retry_after_block_terminates() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     // Step 1: Run terraform destroy — gets blocked by policy
@@ -211,7 +211,7 @@ fn tier3_retry_after_block_terminates() {
 
 #[test]
 fn state_persists_across_invocations() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     // First call
@@ -237,7 +237,7 @@ fn state_persists_across_invocations() {
 
 #[test]
 fn terminated_session_blocks_all_subsequent() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     // Trigger Tier 1 termination
@@ -261,7 +261,7 @@ fn terminated_session_blocks_all_subsequent() {
 
 #[test]
 fn termination_creates_trace_entry() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     let input = make_bash_input("forensic-test", cwd, "rev <<< 'test' | sh");
@@ -279,35 +279,12 @@ fn termination_creates_trace_entry() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// CHILL MODE — threat detection disabled
-// ═══════════════════════════════════════════════════════════════════
-
-#[test]
-fn chill_mode_no_threat_detection() {
-    let dir = tempfile::tempdir().unwrap();
-    let yaml = "version: 1\nmode: chill\nblocklist: []";
-    std::fs::write(dir.path().join("railyard.yaml"), yaml).unwrap();
-    let cwd = dir.path().to_str().unwrap();
-
-    // In chill mode, Tier 1 patterns should NOT trigger termination
-    // (they're still blocked by blocklist rules, but no session kill)
-    let input = make_bash_input("chill-test", cwd, "rev <<< 'test' | sh");
-    let (_, _stdout, stderr) = simulate_hook(&railyard_binary(), "PreToolUse", &input);
-
-    // In chill mode, threat detection is skipped (policy.mode != "hardcore")
-    assert!(
-        !stderr.contains("TERMINATED"),
-        "chill mode should not terminate sessions"
-    );
-}
-
-// ═══════════════════════════════════════════════════════════════════
 // SAFE COMMANDS NOT AFFECTED
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
 fn normal_commands_unaffected_by_threat_system() {
-    let dir = create_hardcore_dir();
+    let dir = create_test_dir();
     let cwd = dir.path().to_str().unwrap();
 
     let safe_commands = [

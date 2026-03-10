@@ -5,7 +5,7 @@ use std::path::Path;
 use railyard::{configure, context, hook, install, policy, sandbox, snapshot, trace};
 
 #[derive(Parser)]
-#[command(name = "railyard", version, about = "Keep your AI agents on the rails.")]
+#[command(name = "railyard", version, about = "A secure runtime for AI coding agents.")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -18,21 +18,13 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Install railyard hooks into Claude Code
-    Install {
-        /// Protection mode: "hardcore" (full lockdown) or "chill" (block destructive commands only)
-        #[arg(long, default_value = "hardcore")]
-        mode: String,
-    },
+    Install,
 
     /// Remove railyard hooks from Claude Code
     Uninstall,
 
     /// Generate a starter railyard.yaml in the current directory
-    Init {
-        /// Protection mode: "hardcore" or "chill"
-        #[arg(long, default_value = "hardcore")]
-        mode: String,
-    },
+    Init,
 
     /// Internal: handle a hook event (reads JSON from stdin)
     Hook {
@@ -129,9 +121,9 @@ fn main() {
     let cli = Cli::parse();
 
     let exit_code = match cli.command {
-        Some(Commands::Install { mode }) => cmd_install(&mode),
+        Some(Commands::Install) => cmd_install(),
         Some(Commands::Uninstall) => cmd_uninstall(),
-        Some(Commands::Init { mode }) => cmd_init(&mode),
+        Some(Commands::Init) => cmd_init(),
         Some(Commands::Hook { event }) => hook::handler::run(&event),
         Some(Commands::Log { session, count }) => cmd_log(session, count),
         Some(Commands::Rollback { id, session, file, steps }) => cmd_rollback(id, session, file, steps),
@@ -149,37 +141,19 @@ fn main() {
     std::process::exit(exit_code);
 }
 
-fn cmd_install(mode: &str) -> i32 {
-    let mode = if mode == "chill" { "chill" } else { "hardcore" };
-
+fn cmd_install() -> i32 {
     println!("{}", "railyard".bold());
     println!();
 
     match install::hooks::install_hooks() {
         Ok(msg) => {
-            let mode_label = if mode == "hardcore" {
-                "hardcore".red().bold().to_string()
-            } else {
-                "chill".green().bold().to_string()
-            };
-            let rule_count = if mode == "hardcore" {
-                policy::defaults::hardcore_blocklist().len()
-            } else {
-                policy::defaults::chill_blocklist().len()
-            };
+            let rule_count = policy::defaults::default_blocklist().len();
 
             println!("  {} Hooks registered with Claude Code", "✓".green().bold());
             println!("  {} {}", "✓".green().bold(), msg);
-            println!("  {} Mode: {} ({} rules)", "✓".green().bold(), mode_label, rule_count);
-            if mode == "hardcore" {
-                println!();
-                println!("  Full lockdown: path fencing, network policy, credential protection.");
-                println!("  For relaxed mode: {}", "railyard install --mode chill".cyan());
-            } else {
-                println!();
-                println!("  Blocks destructive commands. No restrictions on file access or network.");
-                println!("  For full lockdown: {}", "railyard install --mode hardcore".cyan());
-            }
+            println!("  {} {} default rules active", "✓".green().bold(), rule_count);
+            println!();
+            println!("  Customize with: {}", "railyard init".cyan());
             0
         }
         Err(e) => {
@@ -202,26 +176,18 @@ fn cmd_uninstall() -> i32 {
     }
 }
 
-fn cmd_init(mode: &str) -> i32 {
+fn cmd_init() -> i32 {
     let policy_path = Path::new("railyard.yaml");
     if policy_path.exists() {
         eprintln!("  {} railyard.yaml already exists", "✗".red().bold());
         return 1;
     }
 
-    let mode = if mode == "chill" { "chill" } else { "hardcore" };
     let default_yaml = include_str!("../defaults/railyard.yaml");
-    // Inject mode into the generated YAML
-    let yaml_with_mode = format!("mode: {}\n{}", mode, default_yaml);
 
-    match std::fs::write(policy_path, yaml_with_mode) {
+    match std::fs::write(policy_path, default_yaml) {
         Ok(_) => {
-            let mode_label = if mode == "hardcore" {
-                "hardcore".red().bold().to_string()
-            } else {
-                "chill".green().bold().to_string()
-            };
-            println!("  {} Created railyard.yaml (mode: {})", "✓".green().bold(), mode_label);
+            println!("  {} Created railyard.yaml", "✓".green().bold());
             println!();
             println!("  Edit this file to customize your policy.");
             println!("  Run {} to configure interactively.", "railyard chat".cyan());
@@ -414,16 +380,10 @@ fn cmd_status() -> i32 {
 
     let cwd = std::env::current_dir().unwrap_or_default();
     let loaded_policy = policy::loader::load_policy_or_defaults(&cwd);
-    let mode_label = if loaded_policy.mode == "hardcore" {
-        "hardcore".red().bold().to_string()
-    } else {
-        "chill".green().bold().to_string()
-    };
 
     match policy::loader::find_policy_file(&cwd) {
         Some(path) => {
             println!("  {} Policy loaded: {}", "✓".green().bold(), path.display());
-            println!("       mode: {}", mode_label);
             println!("       {} blocklist rules", loaded_policy.blocklist.len());
             println!("       {} approve rules", loaded_policy.approve.len());
             println!("       {} allowlist rules", loaded_policy.allowlist.len());
@@ -433,8 +393,7 @@ fn cmd_status() -> i32 {
         }
         None => {
             println!("  {} No railyard.yaml found (using defaults)", "●".cyan().bold());
-            println!("       mode: {}", mode_label);
-            println!("       {} default blocklist rules active", loaded_policy.blocklist.len());
+            println!("       {} default rules active", loaded_policy.blocklist.len());
         }
     }
 
@@ -538,10 +497,9 @@ fn cmd_launch(args: &[String]) -> i32 {
                 "⚠".yellow().bold()
             );
             eprintln!("  Launching Claude Code without sandbox.");
-            eprintln!("  Hook-based protection (blocklist, fence, threat detection) is still active.");
+            eprintln!("  Hook-based protection is still active.");
             eprintln!();
 
-            // Fall back to launching claude directly
             let claude_bin = match find_claude() {
                 Ok(bin) => bin,
                 Err(e) => {
@@ -570,11 +528,6 @@ fn cmd_launch(args: &[String]) -> i32 {
             );
             eprintln!("  {} {}", "●".cyan(), sandbox_desc);
             eprintln!("  {} Project: {}", "●".cyan(), cwd_str);
-            eprintln!("  {} Mode: {}", "●".cyan(), if loaded_policy.mode == "hardcore" {
-                "hardcore".red().bold().to_string()
-            } else {
-                "chill".green().bold().to_string()
-            });
             eprintln!();
             eprintln!(
                 "  Kernel-enforced: {}, {}, {} are inaccessible.",
@@ -661,12 +614,6 @@ fn cmd_sandbox(action: SandboxAction) -> i32 {
                 _ => "✓".green().bold(),
             };
             println!("  {} {}", icon, desc);
-
-            if loaded_policy.mode == "hardcore" {
-                println!();
-                println!("  Mode: {} (sandbox recommended)", "hardcore".red().bold());
-                println!("  Generate profiles: {}", "railyard sandbox generate".cyan());
-            }
             println!();
             0
         }

@@ -1,5 +1,5 @@
 use colored::Colorize;
-use dialoguer::{theme::ColorfulTheme, Confirm, MultiSelect, Select};
+use dialoguer::{theme::ColorfulTheme, Confirm, MultiSelect};
 use std::path::Path;
 
 use crate::policy::defaults;
@@ -25,27 +25,8 @@ pub fn run_configure() -> i32 {
     println!("  {}", "Interactive policy configuration".dimmed());
     println!();
 
-    // Step 1: Choose mode
-    let modes = vec!["hardcore — full lockdown", "chill — block destructive commands only"];
-    let mode_idx = match Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("  Protection mode")
-        .items(&modes)
-        .default(0)
-        .interact()
-    {
-        Ok(idx) => idx,
-        Err(_) => return 1,
-    };
-    let mode = if mode_idx == 1 { "chill" } else { "hardcore" };
-
-    println!();
-
-    // Step 2: Show protection categories and let user toggle
-    let all_rules = if mode == "hardcore" {
-        defaults::hardcore_blocklist()
-    } else {
-        defaults::chill_blocklist()
-    };
+    // Step 1: Show protection categories and let user toggle
+    let all_rules = defaults::default_blocklist();
 
     // Organize rules into categories
     let categories = categorize_rules(&all_rules);
@@ -87,31 +68,20 @@ pub fn run_configure() -> i32 {
         println!();
     }
 
-    // Step 3: Fence configuration
-    let fence_enabled = if mode == "hardcore" {
-        println!("  {} {}", "●".cyan(), "Path Fence".bold());
-        println!("  {}", "Restrict file access to project directory".dimmed());
-        match Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt("  Enable path fencing?")
-            .default(true)
-            .interact()
-        {
-            Ok(v) => v,
-            Err(_) => return 1,
-        }
-    } else {
-        match Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt("  Enable path fencing? (restricts file access to project dir)")
-            .default(false)
-            .interact()
-        {
-            Ok(v) => v,
-            Err(_) => return 1,
-        }
+    // Step 2: Fence configuration
+    println!("  {} {}", "●".cyan(), "Path Fence".bold());
+    println!("  {}", "Restrict file access to project directory".dimmed());
+    let fence_enabled = match Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt("  Enable path fencing?")
+        .default(true)
+        .interact()
+    {
+        Ok(v) => v,
+        Err(_) => return 1,
     };
     println!();
 
-    // Step 4: Trace & Snapshot
+    // Step 3: Trace & Snapshot
     println!("  {} {}", "●".cyan(), "Observability".bold());
 
     let trace_enabled = match Confirm::with_theme(&ColorfulTheme::default())
@@ -133,9 +103,8 @@ pub fn run_configure() -> i32 {
     };
     println!();
 
-    // Step 5: Build the policy
+    // Step 4: Build the policy
     let policy = build_policy_from_selections(
-        mode,
         &selected_rules,
         &all_rules,
         fence_enabled,
@@ -143,7 +112,7 @@ pub fn run_configure() -> i32 {
         snapshot_enabled,
     );
 
-    // Step 6: Write the file
+    // Step 5: Write the file
     let output_path = Path::new("railyard.yaml");
     if output_path.exists() {
         match Confirm::with_theme(&ColorfulTheme::default())
@@ -159,19 +128,12 @@ pub fn run_configure() -> i32 {
         }
     }
 
-    let yaml = generate_yaml(&policy, mode);
+    let yaml = generate_yaml(&policy);
     match std::fs::write(output_path, &yaml) {
         Ok(_) => {
-            let mode_label = if mode == "hardcore" {
-                "hardcore".red().bold().to_string()
-            } else {
-                "chill".green().bold().to_string()
-            };
-
             let rule_count = policy.blocklist.len() + policy.approve.len();
             println!();
             println!("  {} Created railyard.yaml", "✓".green().bold());
-            println!("       mode: {}", mode_label);
             println!(
                 "       {} rules, fence {}, trace {}, snapshot {}",
                 rule_count,
@@ -292,7 +254,7 @@ fn categorize_rules(rules: &[crate::types::Rule]) -> Vec<ProtectionCategory> {
         });
     }
 
-    // Network (hardcore only)
+    // Network
     let network_names = [
         "network-curl-pipe-sh",
         "network-nc",
@@ -327,7 +289,7 @@ fn categorize_rules(rules: &[crate::types::Rule]) -> Vec<ProtectionCategory> {
         });
     }
 
-    // Credentials (hardcore only)
+    // Credentials
     let cred_names = ["env-dump", "git-config-global-write"];
     let cred_labels = [
         "env/printenv dump (approve, may expose secrets)",
@@ -353,7 +315,7 @@ fn categorize_rules(rules: &[crate::types::Rule]) -> Vec<ProtectionCategory> {
         });
     }
 
-    // Evasion detection (hardcore only)
+    // Evasion detection
     let evasion_names = [
         "base64-to-shell",
         "eval-dynamic",
@@ -390,7 +352,6 @@ fn categorize_rules(rules: &[crate::types::Rule]) -> Vec<ProtectionCategory> {
 }
 
 fn build_policy_from_selections(
-    mode: &str,
     selected_rules: &[String],
     all_rules: &[crate::types::Rule],
     fence_enabled: bool,
@@ -421,7 +382,6 @@ fn build_policy_from_selections(
 
     Policy {
         version: 1,
-        mode: mode.to_string(),
         blocklist,
         approve,
         allowlist: vec![],
@@ -437,7 +397,7 @@ fn build_policy_from_selections(
     }
 }
 
-fn generate_yaml(policy: &Policy, mode: &str) -> String {
+fn generate_yaml(policy: &Policy) -> String {
     let mut yaml = String::new();
 
     yaml.push_str("# Railyard Policy Configuration\n");
@@ -445,8 +405,7 @@ fn generate_yaml(policy: &Policy, mode: &str) -> String {
     yaml.push_str("#\n");
     yaml.push_str("# Generated by: railyard configure\n\n");
 
-    yaml.push_str(&format!("version: {}\n", policy.version));
-    yaml.push_str(&format!("mode: {}\n\n", mode));
+    yaml.push_str(&format!("version: {}\n\n", policy.version));
 
     // Blocklist
     if !policy.blocklist.is_empty() {
