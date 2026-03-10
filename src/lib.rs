@@ -10,3 +10,4 @@ pub mod snapshot;
 pub mod threat;
 pub mod trace;
 pub mod types;
+pub mod update;

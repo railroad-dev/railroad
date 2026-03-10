@@ -74,7 +74,12 @@ pub fn run(event: &str) -> i32 {
             0
         }
         "SessionStart" => {
-            session::handle(&input, &policy);
+            let output = session::handle(&input, &policy);
+            if let Ok(json) = serde_json::to_string(&output) {
+                let _ = std::io::stdout().write_all(json.as_bytes());
+                let _ = std::io::stdout().write_all(b"\n");
+                let _ = std::io::stdout().flush();
+            }
             0
         }
         _ => {

@@ -68,6 +68,17 @@ impl HookOutput {
             }),
         }
     }
+
+    pub fn session_message(message: &str) -> Self {
+        HookOutput {
+            hook_specific_output: Some(HookSpecificOutput {
+                hook_event_name: "SessionStart".to_string(),
+                permission_decision: None,
+                permission_decision_reason: None,
+                additional_context: Some(message.to_string()),
+            }),
+        }
+    }
 }
 
 // ── Policy Types ──
