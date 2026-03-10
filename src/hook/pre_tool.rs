@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::block::evasion;
-use crate::fence::path::{check_path, extract_file_path};
+use crate::fence::path::{check_path, extract_file_path, PathCheck};
 use crate::policy::engine::evaluate;
 use crate::snapshot::capture::capture_snapshot;
 use crate::threat::classifier::{
@@ -147,32 +147,60 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
         if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
             let paths = evasion::extract_paths_from_command(cmd);
             for path in &paths {
-                if let Err(reason) = check_path(&policy.fence, path, &input.cwd) {
-                    let keywords = extract_keywords(cmd);
-                    state.record_block(cmd, "path-fence", keywords, 0);
-                    let _ = state.save(&state_dir);
-                    log_decision(
-                        input, policy, tool_name, &tool_input, "block",
-                        Some("path-fence"), start,
-                    );
-                    return PreToolResult {
-                        output: HookOutput::deny(&reason),
-                        terminate: None,
-                    };
+                match check_path(&policy.fence, path, &input.cwd) {
+                    PathCheck::Allow => {}
+                    PathCheck::Denied(reason) => {
+                        let keywords = extract_keywords(cmd);
+                        state.record_block(cmd, "path-fence", keywords, 0);
+                        let _ = state.save(&state_dir);
+                        log_decision(
+                            input, policy, tool_name, &tool_input, "block",
+                            Some("path-fence"), start,
+                        );
+                        return PreToolResult {
+                            output: HookOutput::deny(&reason),
+                            terminate: None,
+                        };
+                    }
+                    PathCheck::OutsideProject(reason) => {
+                        let _ = state.save(&state_dir);
+                        log_decision(
+                            input, policy, tool_name, &tool_input, "approve",
+                            Some("path-fence"), start,
+                        );
+                        return PreToolResult {
+                            output: HookOutput::ask(&reason),
+                            terminate: None,
+                        };
+                    }
                 }
             }
         }
     } else if let Some(file_path) = extract_file_path(tool_name, &tool_input) {
-        if let Err(reason) = check_path(&policy.fence, &file_path, &input.cwd) {
-            let _ = state.save(&state_dir);
-            log_decision(
-                input, policy, tool_name, &tool_input, "block",
-                Some("path-fence"), start,
-            );
-            return PreToolResult {
-                output: HookOutput::deny(&reason),
-                terminate: None,
-            };
+        match check_path(&policy.fence, &file_path, &input.cwd) {
+            PathCheck::Allow => {}
+            PathCheck::Denied(reason) => {
+                let _ = state.save(&state_dir);
+                log_decision(
+                    input, policy, tool_name, &tool_input, "block",
+                    Some("path-fence"), start,
+                );
+                return PreToolResult {
+                    output: HookOutput::deny(&reason),
+                    terminate: None,
+                };
+            }
+            PathCheck::OutsideProject(reason) => {
+                let _ = state.save(&state_dir);
+                log_decision(
+                    input, policy, tool_name, &tool_input, "approve",
+                    Some("path-fence"), start,
+                );
+                return PreToolResult {
+                    output: HookOutput::ask(&reason),
+                    terminate: None,
+                };
+            }
         }
     }
 

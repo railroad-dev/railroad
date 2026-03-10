@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">railyard</h1>
   <p align="center"><strong>A secure runtime for AI coding agents.</strong></p>
-  <p align="center">Run <code>claude --dangerously-skip-permissions</code> without the danger.<br>Normal commands flow through instantly. Destructive ones get blocked. You stop babysitting.</p>
+  <p align="center">Run <code>claude --dangerously-skip-permissions</code> without the danger.<br>Normal commands flow through instantly. Destructive ones get blocked. Go for a walk. Go make that coffee.</p>
 </p>
 
 <p align="center">
@@ -68,14 +68,14 @@ You keep using `claude` exactly as before. Nothing changes.
 ### Three possible outcomes per command
 
 - **Allow** — command runs, you don't even know Railyard is there (99% of commands)
-- **Block** — agent gets denied, finds another way (destructive stuff, evasion attempts)
-- **Approve** — you get a y/n prompt (sensitive operations like `npm publish`, `curl POST`)
+- **Block** — agent gets denied, finds another way (destructive stuff, evasion attempts, accessing `~/.ssh` or `/etc`)
+- **Approve** — you get a y/n prompt (sensitive operations like `npm publish`, accessing paths outside your project)
 
 ---
 
 ## Customize
 
-The defaults catch things no sane developer would do by accident. Beyond that, you configure.
+The defaults catch things no sane developer would do by accident. If a rule is too strict for your workflow, override it once in `railyard.yaml` — the override persists across every session, so you only decide once.
 
 **Ask Claude to do it:**
 

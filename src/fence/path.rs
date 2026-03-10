@@ -2,21 +2,31 @@ use std::path::Path;
 
 use crate::types::FenceConfig;
 
+/// Result of a path fence check.
+#[derive(Debug, PartialEq)]
+pub enum PathCheck {
+    /// Path is allowed — no fence issue.
+    Allow,
+    /// Path is in an explicitly denied location (e.g. ~/.ssh, /etc) — hard block.
+    Denied(String),
+    /// Path is outside the project directory but not explicitly denied — ask the user.
+    OutsideProject(String),
+}
+
 /// Check if a file path is allowed by the fence configuration.
-/// Returns Ok(()) if allowed, Err(reason) if denied.
 ///
 /// All paths are canonicalized before checking — this resolves:
 /// - Relative traversal (../)
 /// - Symlinks pointing to denied locations
 /// - Home directory expansions (~, $HOME)
-pub fn check_path(config: &FenceConfig, file_path: &str, cwd: &str) -> Result<(), String> {
+pub fn check_path(config: &FenceConfig, file_path: &str, cwd: &str) -> PathCheck {
     if !config.enabled {
-        return Ok(());
+        return PathCheck::Allow;
     }
 
     // Always allow /dev/* paths — they're not real files
     if is_dev_path(file_path) {
-        return Ok(());
+        return PathCheck::Allow;
     }
 
     let expanded = expand_path(file_path);
@@ -27,7 +37,7 @@ pub fn check_path(config: &FenceConfig, file_path: &str, cwd: &str) -> Result<()
     for denied in &config.denied_paths {
         let denied_canonical = canonicalize_best_effort(&expand_path(denied));
         if path_starts_with(&canonical, &denied_canonical) {
-            return Err(format!(
+            return PathCheck::Denied(format!(
                 "Path Fence: '{}' is in denied path '{}'",
                 file_path, denied
             ));
@@ -39,24 +49,24 @@ pub fn check_path(config: &FenceConfig, file_path: &str, cwd: &str) -> Result<()
         for allowed in &config.allowed_paths {
             let allowed_canonical = canonicalize_best_effort(&expand_path(allowed));
             if path_starts_with(&canonical, &allowed_canonical) {
-                return Ok(());
+                return PathCheck::Allow;
             }
         }
-        return Err(format!(
+        return PathCheck::OutsideProject(format!(
             "Path Fence: '{}' is not in any allowed path",
             file_path
         ));
     }
 
-    // Default behavior: path must be within the project directory (cwd)
+    // Default behavior: path outside the project directory needs approval
     if !path_starts_with(&canonical, &cwd_canonical) {
-        return Err(format!(
+        return PathCheck::OutsideProject(format!(
             "Path Fence: '{}' is outside project directory '{}'",
             file_path, cwd
         ));
     }
 
-    Ok(())
+    PathCheck::Allow
 }
 
 /// Canonicalize a path, resolving symlinks and ../
@@ -189,19 +199,19 @@ mod tests {
         let config = default_fence("/project");
         let home = dirs::home_dir().unwrap();
         let ssh_path = format!("{}/.ssh/authorized_keys", home.display());
-        assert!(check_path(&config, &ssh_path, "/project").is_err());
+        assert!(matches!(check_path(&config, &ssh_path, "/project"), PathCheck::Denied(_)));
     }
 
     #[test]
     fn test_etc_blocked() {
         let config = default_fence("/project");
-        assert!(check_path(&config, "/etc/passwd", "/project").is_err());
+        assert!(matches!(check_path(&config, "/etc/passwd", "/project"), PathCheck::Denied(_)));
     }
 
     #[test]
     fn test_project_path_allowed() {
         let config = default_fence("/project");
-        assert!(check_path(&config, "/project/src/main.rs", "/project").is_ok());
+        assert_eq!(check_path(&config, "/project/src/main.rs", "/project"), PathCheck::Allow);
     }
 
     #[test]
@@ -211,7 +221,17 @@ mod tests {
             allowed_paths: vec![],
             denied_paths: vec!["/etc".to_string()],
         };
-        assert!(check_path(&config, "/etc/passwd", "/project").is_ok());
+        assert_eq!(check_path(&config, "/etc/passwd", "/project"), PathCheck::Allow);
+    }
+
+    #[test]
+    fn test_outside_project_is_approve() {
+        let config = FenceConfig {
+            enabled: true,
+            allowed_paths: vec![],
+            denied_paths: vec![],
+        };
+        assert!(matches!(check_path(&config, "/other/file.txt", "/project"), PathCheck::OutsideProject(_)));
     }
 
     #[test]
@@ -221,9 +241,9 @@ mod tests {
             allowed_paths: vec!["/project".to_string(), "/tmp".to_string()],
             denied_paths: vec![],
         };
-        assert!(check_path(&config, "/project/src/main.rs", "/project").is_ok());
-        assert!(check_path(&config, "/tmp/test.txt", "/project").is_ok());
-        assert!(check_path(&config, "/other/file.txt", "/project").is_err());
+        assert_eq!(check_path(&config, "/project/src/main.rs", "/project"), PathCheck::Allow);
+        assert_eq!(check_path(&config, "/tmp/test.txt", "/project"), PathCheck::Allow);
+        assert!(matches!(check_path(&config, "/other/file.txt", "/project"), PathCheck::OutsideProject(_)));
     }
 
     #[test]

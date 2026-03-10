@@ -2,17 +2,13 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use std::path::Path;
 
-use railyard::{configure, context, hook, install, policy, sandbox, snapshot, trace};
+use railyard::{configure, context, hook, install, policy, snapshot, trace};
 
 #[derive(Parser)]
 #[command(name = "railyard", version, about = "A secure runtime for AI coding agents.")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-
-    /// Arguments to pass through to Claude Code (when running without a subcommand)
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    claude_args: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -86,35 +82,6 @@ enum Commands {
 
     /// Interactive policy configuration (launches Claude Code)
     Chat,
-
-    /// OS-level sandbox management
-    Sandbox {
-        #[command(subcommand)]
-        action: SandboxAction,
-    },
-
-    /// Launch Claude Code inside the OS-level sandbox
-    Launch {
-        /// Arguments to pass through to Claude Code
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
-}
-
-#[derive(Subcommand)]
-enum SandboxAction {
-    /// Generate sandbox profiles from railyard.yaml
-    Generate,
-
-    /// Run a command inside the OS-level sandbox
-    Run {
-        /// The command to sandbox
-        #[arg(trailing_var_arg = true)]
-        command: Vec<String>,
-    },
-
-    /// Show sandbox availability on this system
-    Status,
 }
 
 fn main() {
@@ -132,10 +99,10 @@ fn main() {
         Some(Commands::Status) => cmd_status(),
         Some(Commands::Configure) => configure::run_configure(),
         Some(Commands::Chat) => cmd_chat(),
-        Some(Commands::Sandbox { action }) => cmd_sandbox(action),
-        Some(Commands::Launch { args }) => cmd_launch(&args),
-        // No subcommand: launch Claude Code inside sandbox
-        None => cmd_launch(&cli.claude_args),
+        None => {
+            // No subcommand: show status
+            cmd_status()
+        }
     };
 
     std::process::exit(exit_code);
@@ -483,139 +450,3 @@ Read the current railyard.yaml (if it exists) and help the user modify it based 
     }
 }
 
-fn cmd_launch(args: &[String]) -> i32 {
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let cwd_str = cwd.display().to_string();
-    let loaded_policy = policy::loader::load_policy_or_defaults(&cwd);
-
-    let cap = sandbox::detect::detect_sandbox();
-
-    match &cap {
-        sandbox::detect::SandboxCapability::None => {
-            eprintln!(
-                "  {} No OS-level sandbox available on this platform.",
-                "⚠".yellow().bold()
-            );
-            eprintln!("  Launching Claude Code without sandbox.");
-            eprintln!("  Hook-based protection is still active.");
-            eprintln!();
-
-            let claude_bin = match find_claude() {
-                Ok(bin) => bin,
-                Err(e) => {
-                    eprintln!("  {} {}", "✗".red().bold(), e);
-                    return 1;
-                }
-            };
-            let status = std::process::Command::new(&claude_bin)
-                .args(args)
-                .status();
-            match status {
-                Ok(s) => s.code().unwrap_or(1),
-                Err(e) => {
-                    eprintln!("  {} Failed to launch claude: {}", "✗".red().bold(), e);
-                    1
-                }
-            }
-        }
-        _ => {
-            let sandbox_desc = sandbox::detect::describe_capability(&cap);
-            eprintln!("{}", "railyard".bold());
-            eprintln!();
-            eprintln!(
-                "  {} Launching Claude Code inside OS sandbox",
-                "🛡".bold()
-            );
-            eprintln!("  {} {}", "●".cyan(), sandbox_desc);
-            eprintln!("  {} Project: {}", "●".cyan(), cwd_str);
-            eprintln!();
-            eprintln!(
-                "  Kernel-enforced: {}, {}, {} are inaccessible.",
-                "~/.ssh".red(),
-                "~/.aws".red(),
-                "~/.gnupg".red()
-            );
-            eprintln!();
-
-            match sandbox::profile::launch_sandboxed_claude(
-                &loaded_policy,
-                &cwd_str,
-                args,
-            ) {
-                Ok(code) => code,
-                Err(e) => {
-                    eprintln!("  {} {}", "✗".red().bold(), e);
-                    1
-                }
-            }
-        }
-    }
-}
-
-fn find_claude() -> Result<String, String> {
-    let output = std::process::Command::new("which")
-        .arg("claude")
-        .output()
-        .map_err(|e| format!("failed to find claude: {}", e))?;
-
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Err("Claude Code CLI not found. Install: https://docs.anthropic.com/en/docs/claude-code".to_string())
-    }
-}
-
-fn cmd_sandbox(action: SandboxAction) -> i32 {
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let loaded_policy = policy::loader::load_policy_or_defaults(&cwd);
-
-    match action {
-        SandboxAction::Generate => {
-            println!("{}", "railyard sandbox generate".bold());
-            println!();
-            match sandbox::profile::generate_profiles(&loaded_policy, &cwd.display().to_string()) {
-                Ok(msg) => {
-                    println!("  {} {}", "✓".green().bold(), msg);
-                    0
-                }
-                Err(e) => {
-                    eprintln!("  {} {}", "✗".red().bold(), e);
-                    1
-                }
-            }
-        }
-
-        SandboxAction::Run { command } => {
-            if command.is_empty() {
-                eprintln!("  {} No command specified", "✗".red().bold());
-                eprintln!("  Usage: railyard sandbox run -- your-command");
-                return 1;
-            }
-            match sandbox::profile::run_sandboxed(
-                &loaded_policy,
-                &cwd.display().to_string(),
-                &command,
-            ) {
-                Ok(code) => code,
-                Err(e) => {
-                    eprintln!("  {} {}", "✗".red().bold(), e);
-                    1
-                }
-            }
-        }
-
-        SandboxAction::Status => {
-            println!("{}", "railyard sandbox status".bold());
-            println!();
-            let cap = sandbox::detect::detect_sandbox();
-            let desc = sandbox::detect::describe_capability(&cap);
-            let icon = match &cap {
-                sandbox::detect::SandboxCapability::None => "✗".yellow().bold(),
-                _ => "✓".green().bold(),
-            };
-            println!("  {} {}", icon, desc);
-            println!();
-            0
-        }
-    }
-}
