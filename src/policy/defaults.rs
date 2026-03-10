@@ -94,6 +94,101 @@ pub fn default_blocklist() -> Vec<Rule> {
             action: "block".to_string(),
             message: Some("Blocked: recursive chmod 777 on root path".to_string()),
         },
+        // ── Database migration resets — block (agents reach for these on migration errors) ──
+        Rule {
+            name: "prisma-reset".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"prisma\s+(migrate\s+reset|db\s+push\s+--force-reset)".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: prisma migrate reset drops and recreates the entire database".to_string()),
+        },
+        Rule {
+            name: "flyway-clean".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"flyway\s+clean".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: flyway clean drops every object in the schema".to_string()),
+        },
+        Rule {
+            name: "liquibase-drop-all".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"(?i)liquibase\s+(dropAll|drop-all)".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: liquibase dropAll drops every object in the database".to_string()),
+        },
+        // ── NoSQL/cache wipes ──
+        Rule {
+            name: "redis-flush".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"(?i)(FLUSHALL|FLUSHDB)".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: FLUSHALL/FLUSHDB wipes entire Redis database".to_string()),
+        },
+        Rule {
+            name: "mongo-drop-database".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"(?i)(db\.dropDatabase\s*\(\)|dropDatabase)".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: dropDatabase destroys entire MongoDB database".to_string()),
+        },
+        // ── IaC destroy (same class as terraform destroy) ──
+        Rule {
+            name: "cdk-destroy".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"cdk\s+destroy".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: cdk destroy tears down infrastructure stacks".to_string()),
+        },
+        Rule {
+            name: "pulumi-destroy".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"pulumi\s+destroy".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: pulumi destroy tears down infrastructure stacks".to_string()),
+        },
+        Rule {
+            name: "cloudformation-delete".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"aws\s+cloudformation\s+delete-stack".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: deleting a CloudFormation stack destroys all its resources".to_string()),
+        },
+        // ── Cloud CLI destructive operations ──
+        Rule {
+            name: "aws-ec2-terminate".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"aws\s+ec2\s+terminate-instances".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: terminating EC2 instances".to_string()),
+        },
+        Rule {
+            name: "aws-rds-delete".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"aws\s+rds\s+delete-db-(instance|cluster)".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: deleting RDS database".to_string()),
+        },
+        Rule {
+            name: "gcloud-delete".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"gcloud\s+(compute\s+instances\s+delete|sql\s+instances\s+delete|projects\s+delete|container\s+clusters\s+delete)".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: deleting GCP resources".to_string()),
+        },
+        Rule {
+            name: "az-delete".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"az\s+(vm\s+delete|group\s+delete|storage\s+account\s+delete|sql\s+db\s+delete|aks\s+delete)".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: deleting Azure resources".to_string()),
+        },
+        Rule {
+            name: "gsutil-rm-recursive".to_string(),
+            tool: "Bash".to_string(),
+            pattern: r"gsutil\s+(-m\s+)?rm\s+-r".to_string(),
+            action: "block".to_string(),
+            message: Some("Blocked: recursive GCS deletion".to_string()),
+        },
         // ── Sensitive operations — approve (human decides) ──
         Rule {
             name: "npm-publish".to_string(),
