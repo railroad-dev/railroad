@@ -50,4 +50,11 @@ pub fn handle(input: &HookInput, policy: &Policy) {
     if let Err(e) = log_trace(&trace_dir, &input.session_id, &entry) {
         eprintln!("railyard: trace warning: {}", e);
     }
+
+    // Update heartbeat on file locks for Write/Edit
+    if matches!(tool_name, "Write" | "Edit") {
+        if let Some(file_path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
+            crate::coord::lock::heartbeat(file_path, &input.session_id);
+        }
+    }
 }

@@ -1,4 +1,5 @@
 pub mod block;
+pub mod coord;
 pub mod dashboard;
 pub mod configure;
 pub mod context;
@@ -6,6 +7,7 @@ pub mod fence;
 pub mod hook;
 pub mod install;
 pub mod policy;
+pub mod replay;
 pub mod sandbox;
 pub mod snapshot;
 pub mod threat;

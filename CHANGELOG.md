@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-03-11
+
+### Added
+
+- **Coordination layer** — multi-agent file locking across concurrent Claude Code sessions
+  - Automatic lock acquisition on Write/Edit tool calls
+  - Self-healing locks: expire on PID death or 60s inactivity timeout
+  - `railyard locks` command to view all active file locks
+  - Shared context injection on SessionStart — each agent is told what other sessions are working on
+- **Session replay** — `railyard replay --session <id>` TUI to browse a session's complete timeline with tool calls, decisions, relative timestamps, and expandable detail view
+- **151 tests** (was 142)
+
 ## [0.2.1] - 2026-03-11
 
 ### Added

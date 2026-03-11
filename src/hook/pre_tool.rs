@@ -218,6 +218,20 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
 
     match &decision {
         Decision::Allow => {
+            // Coordination: acquire file lock for Write/Edit
+            if matches!(tool_name, "Write" | "Edit") {
+                if let Some(file_path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
+                    if let Some(deny_msg) = crate::coord::context::check_file_conflict(file_path, &input.session_id) {
+                        log_decision(input, policy, tool_name, &tool_input, "block", Some("file-lock"), start);
+                        let _ = state.save(&state_dir);
+                        return PreToolResult {
+                            output: HookOutput::deny(&deny_msg),
+                            terminate: None,
+                        };
+                    }
+                }
+            }
+
             // Snapshot before Write/Edit (if enabled)
             if policy.snapshot.enabled
                 && policy.snapshot.tools.iter().any(|t| t == tool_name)

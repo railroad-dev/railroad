@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/railyarddev/railyard/stargazers"><img src="https://img.shields.io/github/stars/railyarddev/railyard?style=flat" alt="GitHub stars"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/tests-142%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-151%20passed-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/built%20with-Rust-orange.svg" alt="Built with Rust">
   <a href="https://discord.gg/MyaUZSus"><img src="https://img.shields.io/badge/discord-join-7289da.svg" alt="Discord"></a>
 </p>
@@ -112,6 +112,45 @@ Changes take effect immediately. No restart. Policy files walk up directories li
 
 ---
 
+## Coordination layer
+
+Run multiple Claude Code sessions in the same repo without conflicts:
+
+```
+  Session A edits src/auth/login.ts          ✅ lock acquired
+  Session B edits src/payments/stripe.ts     ✅ lock acquired
+  Session B edits src/auth/login.ts          ⛔ BLOCKED — locked by Session A
+```
+
+On session start, each agent is told what the others are working on:
+
+```
+[Railyard] Other active sessions:
+  - Session ...a3f2: editing auth/login.ts, auth/middleware.ts
+  - Session ...b1c4: editing payments/stripe.ts
+Avoid editing files locked by other sessions.
+```
+
+Locks are self-healing — if a session dies, locks expire automatically (PID check + 60s heartbeat timeout). No manual cleanup.
+
+```bash
+railyard locks     # see all active locks
+```
+
+---
+
+## Session replay
+
+Browse what any Claude Code session did — every tool call, decision, and detail:
+
+```bash
+railyard replay --session <id>
+```
+
+A TUI timeline with relative timestamps, color-coded decisions, and expandable detail for each tool call. See exactly what happened while you were away.
+
+---
+
 ## Live dashboard
 
 Watch every tool call across all your Claude Code sessions in real time:
@@ -173,7 +212,7 @@ Railyard is early. [Join the Discord](https://discord.gg/MyaUZSus) — we'd love
 
 ```bash
 git clone https://github.com/railyarddev/railyard.git
-cd railyard && cargo test    # 142 tests
+cd railyard && cargo test    # 151 tests
 ```
 
 ---

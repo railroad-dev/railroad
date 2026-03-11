@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use std::path::Path;
 
-use railyard::{configure, context, dashboard, hook, install, policy, snapshot, trace};
+use railyard::{configure, coord, context, dashboard, hook, install, policy, replay, snapshot, trace};
 
 #[derive(Parser)]
 #[command(name = "railyard", version, about = "A secure runtime for AI coding agents.")]
@@ -95,6 +95,16 @@ enum Commands {
         #[arg(long)]
         history: bool,
     },
+
+    /// Replay a session — browse tool calls, decisions, and details
+    Replay {
+        /// Session ID to replay
+        #[arg(long)]
+        session: String,
+    },
+
+    /// Show active file locks across all sessions
+    Locks,
 }
 
 fn main() {
@@ -119,6 +129,8 @@ fn main() {
                 dashboard::run(session)
             }
         }
+        Some(Commands::Replay { session }) => replay::run(&session),
+        Some(Commands::Locks) => cmd_locks(),
         None => {
             // No subcommand: show status
             cmd_status()
@@ -409,6 +421,52 @@ fn cmd_status() -> i32 {
     }
 
     println!();
+    0
+}
+
+fn cmd_locks() -> i32 {
+    let locks = coord::lock::list_active_locks();
+
+    if locks.is_empty() {
+        println!("  No active file locks.");
+        return 0;
+    }
+
+    println!("{}", "railyard locks".bold());
+    println!();
+
+    // Group by session
+    let mut by_session: std::collections::HashMap<String, Vec<&coord::lock::FileLock>> =
+        std::collections::HashMap::new();
+    for lock in &locks {
+        by_session
+            .entry(lock.session_id.clone())
+            .or_default()
+            .push(lock);
+    }
+
+    for (session_id, files) in &by_session {
+        let short = if session_id.len() > 8 {
+            &session_id[..8]
+        } else {
+            session_id
+        };
+        println!("  {} Session {}...  ({} files)", "●".cyan(), short, files.len());
+        for lock in files {
+            let elapsed = chrono::DateTime::parse_from_rfc3339(&lock.last_heartbeat)
+                .map(|hb| {
+                    let secs = chrono::Utc::now()
+                        .signed_duration_since(hb)
+                        .num_seconds()
+                        .max(0);
+                    format!("{}s ago", secs)
+                })
+                .unwrap_or_else(|_| "?".to_string());
+            println!("    {} {} ({})", "→".green(), lock.file_path, elapsed);
+        }
+        println!();
+    }
+
     0
 }
 

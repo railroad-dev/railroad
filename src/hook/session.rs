@@ -48,7 +48,20 @@ pub fn handle(input: &HookInput, policy: &Policy) -> HookOutput {
         }
     }
 
-    match update_message {
+    // Release any stale locks from a previous run of this session
+    crate::coord::lock::release_all(&input.session_id);
+
+    // Build combined session message
+    let coord_message = crate::coord::context::session_context_message(&input.session_id);
+
+    let combined = match (update_message, coord_message) {
+        (Some(u), Some(c)) => Some(format!("{}\n\n{}", u, c)),
+        (Some(u), None) => Some(u),
+        (None, Some(c)) => Some(c),
+        (None, None) => None,
+    };
+
+    match combined {
         Some(msg) => HookOutput::session_message(&msg),
         None => HookOutput::noop(),
     }
