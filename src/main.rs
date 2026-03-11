@@ -144,8 +144,12 @@ fn cmd_install() -> i32 {
 
             // Prompt to enable bypass permissions (Railyard replaces it)
             println!();
+            println!("  {} We recommend enabling skip permissions — Railyard replaces", "→".cyan().bold());
+            println!("    Claude Code's permission system with its own guardrails,");
+            println!("    so you won't need to approve every command manually.");
+            println!();
             let enable_bypass = Confirm::with_theme(&ColorfulTheme::default())
-                .with_prompt("  Enable dangerously skip permissions? (Railyard replaces it)")
+                .with_prompt("  Enable skip permissions?")
                 .default(true)
                 .interact()
                 .unwrap_or(true);
@@ -153,7 +157,7 @@ fn cmd_install() -> i32 {
             if enable_bypass {
                 match install::hooks::enable_bypass_permissions() {
                     Ok(_) => {
-                        println!("  {} Dangerously skip permissions enabled — Railyard handles safety now", "✓".green().bold());
+                        println!("  {} Skip permissions enabled — Railyard handles safety now", "✓".green().bold());
                     }
                     Err(e) => {
                         eprintln!("  {} Failed to enable bypass mode: {}", "✗".yellow().bold(), e);
