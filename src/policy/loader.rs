@@ -100,6 +100,7 @@ pub fn default_policy() -> Policy {
         fence: Default::default(),
         trace: Default::default(),
         snapshot: Default::default(),
+        memory: Default::default(),
     }
 }
 

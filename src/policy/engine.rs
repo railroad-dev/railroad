@@ -80,6 +80,7 @@ mod tests {
             fence: Default::default(),
             trace: Default::default(),
             snapshot: Default::default(),
+            memory: Default::default(),
         }
     }
 

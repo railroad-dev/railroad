@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use std::path::Path;
 
-use railroad::{configure, coord, context, dashboard, hook, install, policy, replay, snapshot, trace, update};
+use railroad::{configure, coord, context, dashboard, hook, install, memory, policy, replay, snapshot, trace, update};
 
 #[derive(Parser)]
 #[command(name = "railroad", version, about = "A secure runtime for AI coding agents.")]
@@ -112,6 +112,36 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
+
+    /// Memory safety commands — provenance, integrity, audit
+    Memory {
+        #[command(subcommand)]
+        action: MemoryCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoryCommands {
+    /// List all memory files with provenance info
+    List,
+    /// Verify integrity of all memory files
+    Verify,
+    /// Show memory write audit trail
+    Log {
+        /// Number of entries to show
+        #[arg(short, long, default_value = "20")]
+        count: usize,
+    },
+    /// Mark a tampered memory file as untrusted
+    Quarantine {
+        /// Path to the memory file
+        file: String,
+    },
+    /// Re-sign a memory file (confirm content is trusted)
+    Trust {
+        /// Path to the memory file
+        file: String,
+    },
 }
 
 fn main() {
@@ -139,6 +169,7 @@ fn main() {
         Some(Commands::Replay { session }) => replay::run(&session),
         Some(Commands::Locks) => cmd_locks(),
         Some(Commands::Update { check }) => update::run_update(check),
+        Some(Commands::Memory { action }) => cmd_memory(action),
         None => {
             // No subcommand: show status
             cmd_status()
@@ -421,6 +452,7 @@ fn cmd_status() -> i32 {
             println!("       fence: {}", if loaded_policy.fence.enabled { "on" } else { "off" });
             println!("       trace: {}", if loaded_policy.trace.enabled { "on" } else { "off" });
             println!("       snapshot: {}", if loaded_policy.snapshot.enabled { "on" } else { "off" });
+            println!("       memory safety: {}", if loaded_policy.memory.enabled { "on" } else { "off" });
         }
         None => {
             println!("  {} No railroad.yaml found (using defaults)", "●".cyan().bold());
@@ -556,6 +588,222 @@ Read the current railroad.yaml (if it exists) and help the user modify it based 
             eprintln!("  Alternatively, edit railroad.yaml manually.");
             eprintln!("  Run {} to generate a starter config.", "railroad init".cyan());
             1
+        }
+    }
+}
+
+fn cmd_memory(action: MemoryCommands) -> i32 {
+    let cwd = std::env::current_dir().unwrap_or_default();
+
+    match action {
+        MemoryCommands::List => {
+            println!("{}", "railroad memory list".bold());
+            println!();
+
+            let entries = memory::provenance::load_entries(&cwd);
+            if entries.is_empty() {
+                println!("  No memory provenance records found.");
+                println!("  Records are created when Claude Code writes memory files through Railroad.");
+                return 0;
+            }
+
+            // Group by file path, show latest entry per file
+            let mut by_file: std::collections::HashMap<String, &railroad::types::MemoryEntry> =
+                std::collections::HashMap::new();
+            for entry in &entries {
+                by_file.insert(entry.file_path.clone(), entry);
+            }
+
+            let mut files: Vec<_> = by_file.into_iter().collect();
+            files.sort_by(|a, b| a.0.cmp(&b.0));
+
+            for (file_path, entry) in &files {
+                let short: String = if let Some(idx) = file_path.find(".claude/projects/") {
+                    format!("~/{}", &file_path[idx..])
+                } else {
+                    file_path.clone()
+                };
+
+                let approved_icon = if entry.human_approved {
+                    "✓".green().to_string()
+                } else {
+                    "●".cyan().to_string()
+                };
+
+                println!(
+                    "  {} {} [{}] {}",
+                    approved_icon,
+                    short,
+                    entry.classification.cyan(),
+                    entry.provenance.dimmed()
+                );
+            }
+
+            println!();
+            println!("  {} entries across {} files", entries.len(), files.len());
+            0
+        }
+
+        MemoryCommands::Verify => {
+            println!("{}", "railroad memory verify".bold());
+            println!();
+
+            let warnings = memory::guard::verify_memory_integrity(&cwd);
+            if warnings.is_empty() {
+                println!("  {} All memory files verified — no integrity issues", "✓".green().bold());
+            } else {
+                println!(
+                    "  {} {} issue(s) found:\n",
+                    "⚠".yellow().bold(),
+                    warnings.len()
+                );
+                for warning in &warnings {
+                    println!("    {} {}", "•".yellow(), warning);
+                }
+                println!();
+                println!("  To trust a file: {}", "railroad memory trust <file>".cyan());
+                println!(
+                    "  To quarantine: {}",
+                    "railroad memory quarantine <file>".cyan()
+                );
+            }
+            0
+        }
+
+        MemoryCommands::Log { count } => {
+            println!("{}", "railroad memory log".bold());
+            println!();
+
+            let entries = memory::provenance::load_entries(&cwd);
+            if entries.is_empty() {
+                println!("  No memory write history.");
+                return 0;
+            }
+
+            let start = if entries.len() > count {
+                entries.len() - count
+            } else {
+                0
+            };
+
+            for entry in &entries[start..] {
+                let short_path = if let Some(idx) = entry.file_path.find(".claude/projects/") {
+                    format!("~/{}", &entry.file_path[idx..])
+                } else {
+                    entry.file_path.clone()
+                };
+
+                let approved = if entry.human_approved {
+                    " (human-approved)".green().to_string()
+                } else {
+                    String::new()
+                };
+
+                let short_session = if entry.session_id.len() > 8 {
+                    &entry.session_id[..8]
+                } else {
+                    &entry.session_id
+                };
+
+                // Parse and format timestamp
+                let time = chrono::DateTime::parse_from_rfc3339(&entry.timestamp)
+                    .map(|dt| dt.format("%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|_| entry.timestamp.clone());
+
+                println!(
+                    "  {} {} [{}] {} session:{}...{}",
+                    time.dimmed(),
+                    short_path,
+                    entry.classification.cyan(),
+                    entry.provenance,
+                    short_session,
+                    approved
+                );
+            }
+            0
+        }
+
+        MemoryCommands::Quarantine { file } => {
+            println!("{}", "railroad memory quarantine".bold());
+            println!();
+
+            let file_path = if file.starts_with("~/") {
+                if let Some(home) = dirs::home_dir() {
+                    format!("{}{}", home.display(), &file[1..])
+                } else {
+                    file.clone()
+                }
+            } else {
+                file.clone()
+            };
+
+            if !Path::new(&file_path).exists() {
+                eprintln!("  {} File not found: {}", "✗".red().bold(), file);
+                return 1;
+            }
+
+            // Rename with .quarantined suffix
+            let quarantined = format!("{}.quarantined", file_path);
+            match std::fs::rename(&file_path, &quarantined) {
+                Ok(_) => {
+                    println!(
+                        "  {} Quarantined: {} → {}",
+                        "✓".green().bold(),
+                        file,
+                        quarantined
+                    );
+                    println!("  The memory file has been renamed and will not be loaded by Claude Code.");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("  {} Failed to quarantine: {}", "✗".red().bold(), e);
+                    1
+                }
+            }
+        }
+
+        MemoryCommands::Trust { file } => {
+            println!("{}", "railroad memory trust".bold());
+            println!();
+
+            let file_path = if file.starts_with("~/") {
+                if let Some(home) = dirs::home_dir() {
+                    format!("{}{}", home.display(), &file[1..])
+                } else {
+                    file.clone()
+                }
+            } else {
+                file.clone()
+            };
+
+            let content = match std::fs::read_to_string(&file_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("  {} Failed to read file: {}", "✗".red().bold(), e);
+                    return 1;
+                }
+            };
+
+            let classification = memory::classifier::classify(&content);
+            let label = memory::classifier::classification_label(&classification);
+
+            match memory::provenance::sign(&cwd, "manual-trust", &file_path, &content, label, true)
+            {
+                Ok(_) => {
+                    println!(
+                        "  {} Trusted: {} [{}]",
+                        "✓".green().bold(),
+                        file,
+                        label.cyan()
+                    );
+                    println!("  Content hash recorded. Future integrity checks will use this as baseline.");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("  {} Failed to sign: {}", "✗".red().bold(), e);
+                    1
+                }
+            }
         }
     }
 }

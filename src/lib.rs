@@ -6,6 +6,7 @@ pub mod context;
 pub mod fence;
 pub mod hook;
 pub mod install;
+pub mod memory;
 pub mod policy;
 pub mod replay;
 pub mod sandbox;

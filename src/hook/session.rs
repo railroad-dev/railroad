@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::memory::guard as memory_guard;
 use crate::threat::killer::format_restart_warning;
 use crate::threat::state::SessionState;
 use crate::trace::logger::log_trace;
@@ -48,17 +49,37 @@ pub fn handle(input: &HookInput, policy: &Policy) -> HookOutput {
         }
     }
 
+    // Verify memory integrity (if enabled)
+    let memory_message = if policy.memory.enabled && policy.memory.verify_on_read {
+        let warnings = memory_guard::verify_memory_integrity(cwd);
+        if warnings.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "⚠️ Railroad Memory: {} memory file(s) have integrity issues. Run `railroad memory verify` for details.\n{}",
+                warnings.len(),
+                warnings.iter().map(|w| format!("  • {}", w)).collect::<Vec<_>>().join("\n")
+            ))
+        }
+    } else {
+        None
+    };
+
     // Release any stale locks from a previous run of this session
     crate::coord::lock::release_all(&input.session_id);
 
     // Build combined session message
     let coord_message = crate::coord::context::session_context_message(&input.session_id);
 
-    let combined = match (update_message, coord_message) {
-        (Some(u), Some(c)) => Some(format!("{}\n\n{}", u, c)),
-        (Some(u), None) => Some(u),
-        (None, Some(c)) => Some(c),
-        (None, None) => None,
+    let messages: Vec<String> = [update_message, coord_message, memory_message]
+        .into_iter()
+        .flatten()
+        .collect();
+
+    let combined = if messages.is_empty() {
+        None
+    } else {
+        Some(messages.join("\n\n"))
     };
 
     match combined {

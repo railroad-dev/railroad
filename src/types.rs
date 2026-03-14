@@ -115,6 +115,8 @@ pub struct Policy {
     pub trace: TraceConfig,
     #[serde(default)]
     pub snapshot: SnapshotConfig,
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
 
 fn default_version() -> u32 {
@@ -219,6 +221,70 @@ fn default_snapshot_tools() -> Vec<String> {
 
 fn default_snapshot_dir() -> String {
     ".railroad/snapshots".to_string()
+}
+
+// ── Memory Safety Types ──
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MemoryConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub require_approval_for_behavioral: bool,
+    #[serde(default = "default_true")]
+    pub block_secrets: bool,
+    #[serde(default = "default_true")]
+    pub append_only: bool,
+    #[serde(default = "default_true")]
+    pub verify_on_read: bool,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        MemoryConfig {
+            enabled: true,
+            require_approval_for_behavioral: true,
+            block_secrets: true,
+            append_only: true,
+            verify_on_read: true,
+        }
+    }
+}
+
+/// Provenance record for a memory file write.
+/// Stored in .railroad/memory/provenance.jsonl
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEntry {
+    pub id: String,
+    pub timestamp: String,
+    pub session_id: String,
+    pub file_path: String,
+    pub content_hash: String,
+    pub classification: String,
+    pub human_approved: bool,
+    pub provenance: String,
+}
+
+/// Result of memory content classification.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MemoryClassification {
+    /// Factual project context — auto-allow
+    Factual,
+    /// Behavioral directive — requires human approval
+    Behavioral,
+    /// Contains secrets/credentials — block
+    Secret,
+}
+
+/// Decision from the memory guard.
+#[derive(Debug, Clone)]
+pub enum MemoryDecision {
+    /// Allow the write
+    Allow,
+    /// Block the write with a reason
+    Block(String),
+    /// Ask for human approval with a reason
+    Approve(String),
 }
 
 // ── Trace Entry ──

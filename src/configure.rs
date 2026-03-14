@@ -394,6 +394,7 @@ fn build_policy_from_selections(
             enabled: snapshot_enabled,
             ..Default::default()
         },
+        memory: Default::default(),
     }
 }
 

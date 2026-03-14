@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use crate::block::evasion;
 use crate::fence::path::{check_path, extract_file_path, PathCheck};
+use crate::memory::guard as memory_guard;
 use crate::policy::engine::evaluate;
 use crate::snapshot::capture::capture_snapshot;
 use crate::threat::classifier::{
@@ -10,7 +11,7 @@ use crate::threat::classifier::{
 };
 use crate::threat::state::SessionState;
 use crate::trace::logger::log_trace;
-use crate::types::{Decision, HookInput, HookOutput, Policy, TraceEntry};
+use crate::types::{Decision, HookInput, HookOutput, MemoryDecision, Policy, TraceEntry};
 
 /// Result of handling a PreToolUse event.
 /// If `terminate` is Some, the caller should terminate the session.
@@ -136,6 +137,83 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
 
                 ThreatTier::Tier3 { .. } => {
                     // Tier 3 is handled above (behavioral check)
+                }
+            }
+        }
+    }
+
+    // === MEMORY GUARD (before path fence, since ~/.claude is denied) ===
+
+    if policy.memory.enabled {
+        // For Bash commands, check if they touch memory paths
+        let memory_file_path = if tool_name == "Bash" {
+            tool_input
+                .get("command")
+                .and_then(|v| v.as_str())
+                .and_then(|cmd| {
+                    let paths = evasion::extract_paths_from_command(cmd);
+                    paths.into_iter().find(|p| memory_guard::is_memory_path(p))
+                })
+        } else {
+            extract_file_path(tool_name, &tool_input)
+                .filter(|p| memory_guard::is_memory_path(p))
+        };
+
+        if let Some(ref mem_path) = memory_file_path {
+            let result = memory_guard::check_memory_write(
+                &policy.memory,
+                tool_name,
+                mem_path,
+                &tool_input,
+                &input.session_id,
+                cwd,
+            );
+            match result {
+                MemoryDecision::Allow => {
+                    // Memory guard approved — skip path fence for this path
+                    log_decision(
+                        input, policy, tool_name, &tool_input, "allow",
+                        Some("memory-guard"), start,
+                    );
+                    let _ = state.save(&state_dir);
+
+                    // Still do snapshot before Write/Edit
+                    if policy.snapshot.enabled
+                        && policy.snapshot.tools.iter().any(|t| t == tool_name)
+                    {
+                        if let Some(file_path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
+                            let snap_dir = cwd.join(&policy.snapshot.directory);
+                            let tool_use_id = input.tool_use_id.as_deref().unwrap_or("unknown");
+                            let _ = capture_snapshot(&snap_dir, &input.session_id, tool_use_id, file_path);
+                        }
+                    }
+
+                    return PreToolResult {
+                        output: HookOutput::allow(),
+                        terminate: None,
+                    };
+                }
+                MemoryDecision::Block(reason) => {
+                    let _ = state.save(&state_dir);
+                    log_decision(
+                        input, policy, tool_name, &tool_input, "block",
+                        Some("memory-guard"), start,
+                    );
+                    return PreToolResult {
+                        output: HookOutput::deny(&format!("⛔ Railroad: {}", reason)),
+                        terminate: None,
+                    };
+                }
+                MemoryDecision::Approve(reason) => {
+                    let _ = state.save(&state_dir);
+                    log_decision(
+                        input, policy, tool_name, &tool_input, "approve",
+                        Some("memory-guard"), start,
+                    );
+                    return PreToolResult {
+                        output: HookOutput::ask(&format!("⚠️ Railroad: {}", reason)),
+                        terminate: None,
+                    };
                 }
             }
         }
