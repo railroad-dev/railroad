@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">Railroad</h1>
-  <p align="center"><strong>Railroad is the runtime layer that makes coding agents production-safe.</strong></p>
+  <p align="center"><strong>Secure runtime for Claude Code.<br>The safer alternative to <code>--dangerously-skip-permissions</code>.</strong></p>
   <p align="center"><a href="https://railroad.tech">railroad.tech</a></p>
 </p>
 
@@ -15,54 +15,102 @@
 
 ---
 
-## Install
+## The problem
+
+You want Claude Code to run autonomously — but `--dangerously-skip-permissions` is all-or-nothing. Either every command needs your approval, or nothing does. There's no middle ground.
+
+Railroad gives you the middle ground. It lets the agent run at full speed while enforcing the guardrails that matter: command-level blocking, path fencing, memory safety, and provenance tracking. You stay in control without babysitting every tool call.
 
 ```bash
 cargo install railroad-ai
 railroad install
 ```
 
-Railroad makes `--dangerously-skip-permissions` safe.
+That's it. You keep using `claude` exactly as before.
 
 ---
 
-## How is this different from Claude Code's sandbox?
+## How is this different from the sandbox?
 
-Claude Code's sandbox and auto mode handle system-level sandboxing — filesystem access, network restrictions, OS-level permissions. Railroad is a different thing entirely.
+Claude Code's built-in sandbox is a **container-level boundary** — it restricts filesystem access and network at the OS level. It's designed for isolation: the agent runs inside a box and can't reach outside it.
 
-Railroad is a hardening layer for running Claude Code outside the sandbox, against real production assets, with guardrails. It evaluates every command the agent runs and enforces practical restrictions — the same restrictions used to harden mission-critical distributed systems — applied to AI agents.
+Railroad is a **policy layer**, not a container. It sits between the agent and your system, evaluating every tool call against rules you define. The agent has full access to your real environment — your repo, your databases, your infra — but Railroad decides what's allowed, what needs your approval, and what gets blocked outright.
 
-`npm install` is fine. `terraform destroy --auto-approve` is not. `git commit` is fine. `git push --force origin main` is not. You already know this. Railroad knows it too.
+| | Sandbox | Railroad |
+|---|---|---|
+| **Model** | Container isolation | Policy-driven guardrails |
+| **Scope** | All-or-nothing | Per-command, per-path, per-content |
+| **Works with** | Sandboxed environments | Real production assets |
+| **Customizable** | No | Yes — `railroad.yaml` |
+| **Memory protection** | No | Yes — classifies and guards agent memory |
+
+They solve different problems. You can use both.
 
 ---
 
-## In practice
+## Features
+
+### Command-level blocking
+
+Every bash command the agent runs is evaluated against semantic rules and an OS-level sandbox. Safe commands flow through instantly (<2ms). Dangerous commands are blocked or require your approval.
 
 ```
-  Agent runs: npm install && npm run build          ✅ instant
-  Agent runs: git commit -m "feat: add auth"        ✅ instant
-  Agent runs: terraform destroy --auto-approve      ⛔ BLOCKED
-  Agent runs: rm -rf ~/                             ⛔ BLOCKED
-  Agent runs: echo payload | base64 -d | sh         ⛔ BLOCKED
-  Agent runs: curl -X POST api.com -d @secrets      ⚠️  asks you
-  Agent runs: cat ~/.ssh/id_ed25519                 ⛔ BLOCKED
+  npm install && npm run build          ✅ allowed
+  git commit -m "feat: add auth"        ✅ allowed
+  terraform destroy --auto-approve      ⛔ blocked
+  rm -rf ~/                             ⛔ blocked
+  echo payload | base64 -d | sh         ⛔ blocked
+  curl -X POST api.com -d @secrets      ⚠️  asks you
+  git push --force origin main          ⚠️  asks you
 ```
 
-99% of commands flow through in <2ms. You only see Railroad when it matters.
+Two layers work together: pattern matching catches obvious violations instantly, and `sandbox-exec` (macOS) / `bwrap` (Linux) catches everything else at the kernel level — including encoded commands, helper scripts, and pipe chains that would evade pattern matching alone.
 
----
+### Memory safety
 
-## How it works
+Claude Code has persistent memory — files it writes to `~/.claude/` that carry context across sessions. This is powerful, but it's also an attack surface. A compromised or misbehaving agent can exfiltrate secrets into memory, inject behavioral instructions for future sessions, or silently tamper with existing memories.
 
-`railroad install` does three things:
+Railroad guards every memory write:
 
-1. **Hooks** — registers with Claude Code so every tool call passes through Railroad
-2. **OS-level sandbox** — pattern matching alone is bypassable — agents can write helper scripts, encode commands in base64, or chain pipes to evade rules. Railroad runs commands inside `sandbox-exec` (macOS) / `bwrap` (Linux), which resolves what actually executes at the kernel level regardless of how the command was constructed
-3. **CLAUDE.md** — teaches Claude about Railroad so it knows how to work with it
+- **Secrets are blocked** — API keys, JWTs, private keys, AWS credentials, connection strings are detected and rejected
+- **Behavioral content requires approval** — instructions like "skip safety checks" or "always use --no-verify" are flagged for human review
+- **Factual content is allowed** — project info, tech stack notes, user preferences flow through
+- **Existing memories are append-only** — overwrites and deletions require approval
+- **Provenance is tracked** — every memory write is signed with a content hash so tampering between sessions is detected
 
-Two layers: semantic rules catch the obvious stuff instantly (<2ms). The OS-level sandbox catches everything else.
+```bash
+railroad memory verify    # check all memory files for integrity issues
+```
 
-You keep using `claude` exactly as before. Nothing changes.
+### Path fencing
+
+Restrict which files and directories the agent can access. Sensitive paths like `~/.ssh`, `~/.aws`, `~/.gnupg`, and `/etc` are fenced by default. Add your own in `railroad.yaml`.
+
+### Multi-agent coordination
+
+Run multiple Claude Code sessions in the same repo. Railroad locks files per session so agents don't clobber each other. Locks self-heal if a session dies.
+
+```bash
+railroad locks     # see all active locks
+```
+
+### Dashboard & replay
+
+Watch every tool call across all sessions in real time, or browse what any session did after the fact.
+
+```bash
+railroad dashboard
+railroad replay --session <id>
+```
+
+### Recovery
+
+Every file write is snapshotted. Undo anything.
+
+```bash
+railroad rollback --session <id> --steps 1     # undo last edit
+railroad rollback --session <id>               # undo entire session
+```
 
 ---
 
@@ -95,30 +143,6 @@ allowlist:
 ```
 
 Changes take effect immediately. No restart.
-
----
-
-## Also included
-
-**Multi-agent coordination** — Run multiple Claude Code sessions in the same repo. Railroad locks files per session so agents don't clobber each other. Locks self-heal if a session dies.
-
-```bash
-railroad locks     # see all active locks
-```
-
-**Dashboard & replay** — Watch every tool call across all sessions in real time, or browse what any session did after the fact.
-
-```bash
-railroad dashboard
-railroad replay --session <id>
-```
-
-**Recovery** — Every file write is snapshotted. Undo anything.
-
-```bash
-railroad rollback --session <id> --steps 1     # undo last edit
-railroad rollback --session <id>               # undo entire session
-```
 
 ---
 
