@@ -33,7 +33,7 @@ cargo install railguard
 railguard install
 ```
 
-That's it. You keep using claude exactly as before.
+That's it. Keep using Claude exactly as before.
 
 ---
 
