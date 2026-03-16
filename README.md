@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Safe runtime for Claude Code, built to be yours.</strong><br>
-  <a href="https://railguard.dev">railguard.dev</a>
+  <a href="https://railguard.dev">railguard.tech</a>
 </p>
 
 <p align="center">
