@@ -65,13 +65,15 @@ The same command can get different decisions depending on context:
 
 ## What it guards
 
-| Tool | What Railguard checks |
-|------|----------------------|
-| **Bash** | Command classification, pipe analysis, evasion detection (base64, helper scripts) |
-| **Read** | Sensitive path detection (`~/.ssh`, `~/.aws`, `.env`, ...) |
-| **Write** | Path fencing + content inspection (secrets, dangerous payloads) |
-| **Edit** | Path fencing + content inspection on replacements |
-| **Memory** | Classification of agent memory writes (secrets, behavioral injection, tampering) |
+**Bash** — command classification, pipe analysis, evasion detection (base64, helper scripts)
+
+**Read** — sensitive path detection (`~/.ssh`, `~/.aws`, `.env`, ...)
+
+**Write** — path fencing + content inspection (secrets, dangerous payloads)
+
+**Edit** — path fencing + content inspection on replacements
+
+**Memory** — classification of agent memory writes (secrets, behavioral injection, tampering)
 
 ---
 
