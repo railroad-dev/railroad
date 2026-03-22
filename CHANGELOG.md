@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-03-22 — Graceful Fail-Safe
+
+Railguard no longer permanently kills sessions or silently blocks without explanation. Every decision now tells you who's asking, why, and what to do about it.
+
+### Added
+
+- **Claude Code plugin support** — Railguard can now be loaded as a native Claude Code plugin (`claude --plugin-dir`). Includes `.claude-plugin/plugin.json` manifest, `hooks/hooks.json`, `settings.json`, and `CLAUDE.md`. No need to run `railguard install` when using as a plugin.
+- **`railguard plugin` command** — prints the plugin directory path for easy use with `claude --plugin-dir $(railguard plugin)`.
+- **Session resume** — terminated sessions now ask the user for approval to resume instead of permanently blocking all tool calls. If approved, all threat state (suspicion, warnings, block history) is fully reset so the session starts clean.
+- **Descriptive approval prompts** — every approval prompt now starts with "🛡️ RAILGUARD is asking (not Claude Code's permission system)" so users understand why they're being prompted despite skip-permissions mode. Each prompt includes the specific rule or pattern that triggered it and a preview of the command.
+- **Informative termination messages** — deny messages on terminated sessions now include the specific reason, session ID, and `railguard log` command. Terminal output on kill explains it's Railguard (not Claude Code) and provides both `log` and `context` review commands.
+
+### Changed
+
+- **No more permanent session kills** — previously, a terminated session blocked every subsequent tool call with a hard deny. Now it asks the user to approve resuming, making accidental kills (like legitimate `python3 -c` with `chr()`) recoverable without starting a new session.
+- **Approval messages are context-rich** — Tier 1/2/3 evasion, path fence, policy rules, and memory guard prompts all explain what triggered them and what approving means.
+
 ## [0.3.4] - 2026-03-12
 
 ### Added

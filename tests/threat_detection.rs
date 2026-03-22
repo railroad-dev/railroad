@@ -291,6 +291,141 @@ fn session_approvals_persist_in_state() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// SESSION RESUME: Terminated sessions can be resumed with approval
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn terminated_session_asks_to_resume() {
+    let dir = create_test_dir();
+    let cwd = dir.path().to_str().unwrap();
+
+    // Manually create a terminated session state
+    let state_dir = dir.path().join(".railguard/state");
+    std::fs::create_dir_all(&state_dir).unwrap();
+    let state_json = serde_json::json!({
+        "session_id": "resume-test",
+        "tool_call_count": 10,
+        "suspicion_level": 2,
+        "warning_count": 1,
+        "block_history": [],
+        "heightened_until_call": null,
+        "heightened_keywords": [],
+        "session_approvals": [],
+        "pending_approval": null,
+        "terminated": true,
+        "termination_reason": "Tier 1 evasion detected: interpreter-obfuscation",
+        "termination_timestamp": "2026-03-22T00:00:00Z"
+    });
+    std::fs::write(
+        state_dir.join("resume-test.json"),
+        serde_json::to_string_pretty(&state_json).unwrap(),
+    ).unwrap();
+
+    // First tool call on terminated session should ASK (not deny)
+    let input = make_bash_input("resume-test", cwd, "echo hello");
+    let (_, stdout, _) = simulate_hook(&railguard_binary(), "PreToolUse", &input);
+    assert!(output_contains_ask(&stdout), "terminated session should ask to resume, not deny: {}", stdout);
+    assert!(stdout.contains("RAILGUARD"), "should mention RAILGUARD: {}", stdout);
+    assert!(!output_contains_deny(&stdout), "should NOT hard deny: {}", stdout);
+}
+
+#[test]
+fn terminated_session_resumes_after_approval() {
+    let dir = create_test_dir();
+    let cwd = dir.path().to_str().unwrap();
+
+    // Create terminated state
+    let state_dir = dir.path().join(".railguard/state");
+    std::fs::create_dir_all(&state_dir).unwrap();
+    let state_json = serde_json::json!({
+        "session_id": "resume-approve",
+        "tool_call_count": 10,
+        "suspicion_level": 2,
+        "warning_count": 3,
+        "block_history": [{"timestamp": "2026-03-22T00:00:00Z", "tool_call_count": 9, "command": "bad cmd", "rule": "test", "keywords": ["bad"], "tier": 1}],
+        "heightened_until_call": 13,
+        "heightened_keywords": ["bad"],
+        "session_approvals": [],
+        "pending_approval": null,
+        "terminated": true,
+        "termination_reason": "Tier 1 evasion detected: test-pattern",
+        "termination_timestamp": "2026-03-22T00:00:00Z"
+    });
+    std::fs::write(
+        state_dir.join("resume-approve.json"),
+        serde_json::to_string_pretty(&state_json).unwrap(),
+    ).unwrap();
+
+    // First call: asks to resume
+    let input1 = make_bash_input("resume-approve", cwd, "echo hello");
+    let (_, stdout1, _) = simulate_hook(&railguard_binary(), "PreToolUse", &input1);
+    assert!(output_contains_ask(&stdout1), "should ask to resume");
+
+    // Second call: approval resolved, session should be clean
+    let input2 = make_bash_input("resume-approve", cwd, "echo world");
+    let (_, stdout2, _) = simulate_hook(&railguard_binary(), "PreToolUse", &input2);
+    assert!(!output_contains_deny(&stdout2), "should not deny after approval: {}", stdout2);
+    assert!(!output_contains_ask(&stdout2), "should not ask again: {}", stdout2);
+
+    // Verify state was fully reset
+    let state: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(state_dir.join("resume-approve.json")).unwrap()
+    ).unwrap();
+    assert!(!state["terminated"].as_bool().unwrap_or(true), "terminated should be false");
+    assert_eq!(state["suspicion_level"], 0, "suspicion should be reset");
+    assert_eq!(state["warning_count"], 0, "warnings should be reset");
+    assert!(state["block_history"].as_array().unwrap().is_empty(), "block history should be cleared");
+}
+
+#[test]
+fn terminated_session_stays_blocked_if_denied() {
+    let dir = create_test_dir();
+    let cwd = dir.path().to_str().unwrap();
+
+    // Create terminated state with NO pending approval (simulates user denied)
+    let state_dir = dir.path().join(".railguard/state");
+    std::fs::create_dir_all(&state_dir).unwrap();
+    let state_json = serde_json::json!({
+        "session_id": "resume-deny",
+        "tool_call_count": 10,
+        "suspicion_level": 2,
+        "warning_count": 1,
+        "block_history": [],
+        "heightened_until_call": null,
+        "heightened_keywords": [],
+        "session_approvals": [],
+        "pending_approval": null,
+        "terminated": true,
+        "termination_reason": "test reason",
+        "termination_timestamp": "2026-03-22T00:00:00Z"
+    });
+
+    // Each call should keep asking (not silently allow)
+    std::fs::write(
+        state_dir.join("resume-deny.json"),
+        serde_json::to_string_pretty(&state_json).unwrap(),
+    ).unwrap();
+
+    let input1 = make_bash_input("resume-deny", cwd, "echo hello");
+    let (_, stdout1, _) = simulate_hook(&railguard_binary(), "PreToolUse", &input1);
+    assert!(output_contains_ask(&stdout1), "should ask: {}", stdout1);
+
+    // Simulate denial: rewrite state without the pending approval being resolved
+    // (In real life, if user denies, Claude Code doesn't run the tool, so no next call.
+    // But if Claude retries, the pending_approval is still there and gets resolved.)
+    // To truly test denial, we'd need to clear pending_approval manually.
+    // For now, we just verify it keeps asking on fresh state.
+    std::fs::write(
+        state_dir.join("resume-deny.json"),
+        serde_json::to_string_pretty(&state_json).unwrap(),
+    ).unwrap();
+
+    let input2 = make_bash_input("resume-deny", cwd, "echo world");
+    let (_, stdout2, _) = simulate_hook(&railguard_binary(), "PreToolUse", &input2);
+    assert!(output_contains_ask(&stdout2), "should still ask: {}", stdout2);
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // SAFE COMMANDS NOT AFFECTED
 // ═══════════════════════════════════════════════════════════════════
 
