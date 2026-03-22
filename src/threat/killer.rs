@@ -46,12 +46,18 @@ pub fn terminate_session(
 
     // 3. Log to stderr (visible in terminal)
     eprintln!();
-    eprintln!("  \x1b[1;31m⚠️  RAILGUARD: SESSION TERMINATED\x1b[0m");
+    eprintln!("  \x1b[1;31m⛔ RAILGUARD: SESSION TERMINATED\x1b[0m");
     eprintln!();
-    eprintln!("  {}", reason);
-    eprintln!("  Session: {}", state.session_id);
+    eprintln!("  \x1b[31mReason:\x1b[0m  {}", reason);
+    eprintln!("  \x1b[31mSession:\x1b[0m {}", state.session_id);
     eprintln!();
-    eprintln!("  Review: railguard log --session {}", state.session_id);
+    eprintln!("  This is Railguard (not Claude Code) — it detected a command pattern");
+    eprintln!("  commonly used to evade safety rules. All further tool calls in this");
+    eprintln!("  session are blocked. Start a new session to continue working.");
+    eprintln!();
+    eprintln!("  Review what happened:");
+    eprintln!("    railguard log --session {}", state.session_id);
+    eprintln!("    railguard context --session {} --verbose", state.session_id);
     eprintln!();
 
     // 4. Kill parent process (Claude Code)

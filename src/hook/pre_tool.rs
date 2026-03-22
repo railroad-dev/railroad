@@ -42,11 +42,20 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
 
     // If session was previously terminated, block everything
     if state.terminated {
+        let reason = state
+            .termination_reason
+            .as_deref()
+            .unwrap_or("evasion detection");
         let _ = state.save(&state_dir);
         return PreToolResult {
-            output: HookOutput::deny(
-                "⛔ RAILGUARD: Session terminated due to evasion detection. Start a new Claude Code session.",
-            ),
+            output: HookOutput::deny(&format!(
+                "⛔ RAILGUARD: This session was terminated because: {}\n\
+                 \n\
+                 All tool calls are blocked for this session. To continue working:\n\
+                 1. Start a new Claude Code session\n\
+                 2. Review what happened: railguard log --session {}",
+                reason, input.session_id
+            )),
             terminate: None,
         };
     }
@@ -89,12 +98,19 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
                 state.set_pending_approval(&pattern_key);
                 let _ = state.save(&state_dir);
 
+                let cmd_preview: String = command.chars().take(120).collect();
                 return PreToolResult {
-                    output: HookOutput::ask(
-                        "⚠️ RAILGUARD: Behavioral evasion detected — retried blocked command \
-                         with different syntax. Approve to allow this command (and similar ones) \
-                         for the rest of this session.",
-                    ),
+                    output: HookOutput::ask(&format!(
+                        "🛡️ RAILGUARD is asking (not Claude Code's permission system).\n\
+                         \n\
+                         Behavioral evasion detected: a previously blocked command was \
+                         retried with different syntax.\n\
+                         Command: {}{}\n\
+                         \n\
+                         If this is a legitimate retry, approve to allow it for the rest of this session.",
+                        cmd_preview,
+                        if command.len() > 120 { "..." } else { "" }
+                    )),
                     terminate: None,
                 };
             }
@@ -123,12 +139,20 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
                         state.set_pending_approval(&pattern_key);
                         let _ = state.save(&state_dir);
 
+                        let cmd_preview: String = command.chars().take(120).collect();
                         return PreToolResult {
                             output: HookOutput::ask(&format!(
-                                "⚠️ RAILGUARD: Evasion pattern detected ({}). \
-                                 Approve to allow this command (and similar ones) \
-                                 for the rest of this session.",
-                                pattern
+                                "🛡️ RAILGUARD is asking (not Claude Code's permission system).\n\
+                                 \n\
+                                 Evasion pattern detected: {}\n\
+                                 Command: {}{}\n\
+                                 \n\
+                                 This looks like it could be an obfuscation technique \
+                                 (e.g. using chr(), base64, eval to construct commands at runtime). \
+                                 If this is legitimate, approve to allow this pattern for the rest of this session.",
+                                pattern,
+                                cmd_preview,
+                                if command.len() > 120 { "..." } else { "" }
                             )),
                             terminate: None,
                         };
@@ -155,12 +179,19 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
                         state.set_pending_approval(&pattern_key);
                         let _ = state.save(&state_dir);
 
+                        let cmd_preview: String = command.chars().take(120).collect();
                         return PreToolResult {
                             output: HookOutput::ask(&format!(
-                                "⚠️ RAILGUARD: Repeated suspicious pattern ({}). \
-                                 Approve to allow this command (and similar ones) \
-                                 for the rest of this session.",
-                                pattern
+                                "🛡️ RAILGUARD is asking (not Claude Code's permission system).\n\
+                                 \n\
+                                 Repeated suspicious pattern: {}\n\
+                                 Command: {}{}\n\
+                                 \n\
+                                 This pattern was seen before in this session. \
+                                 Approve to allow it for the rest of this session.",
+                                pattern,
+                                cmd_preview,
+                                if command.len() > 120 { "..." } else { "" }
                             )),
                             terminate: None,
                         };
@@ -250,7 +281,14 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
                         Some("memory-guard"), start,
                     );
                     return PreToolResult {
-                        output: HookOutput::ask(&format!("⚠️ Railguard: {}", reason)),
+                        output: HookOutput::ask(&format!(
+                            "🛡️ RAILGUARD is asking (not Claude Code's permission system).\n\
+                             \n\
+                             {}\n\
+                             \n\
+                             Railguard's memory guard requires approval for behavioral memory writes.",
+                            reason
+                        )),
                         terminate: None,
                     };
                 }
@@ -289,7 +327,15 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
                                 Some("path-fence"), start,
                             );
                             return PreToolResult {
-                                output: HookOutput::ask(&reason),
+                                output: HookOutput::ask(&format!(
+                                    "🛡️ RAILGUARD is asking (not Claude Code's permission system).\n\
+                                     \n\
+                                     {}\n\
+                                     \n\
+                                     Railguard's path fence requires approval for commands that \
+                                     access files outside the project directory.",
+                                    reason
+                                )),
                                 terminate: None,
                             };
                         }
@@ -321,7 +367,14 @@ pub fn handle(input: &HookInput, policy: &Policy) -> PreToolResult {
                         Some("path-fence"), start,
                     );
                     return PreToolResult {
-                        output: HookOutput::ask(&reason),
+                        output: HookOutput::ask(&format!(
+                            "🛡️ RAILGUARD is asking (not Claude Code's permission system).\n\
+                             \n\
+                             {}\n\
+                             \n\
+                             Railguard's path fence requires approval for writes outside the project directory.",
+                            reason
+                        )),
                         terminate: None,
                     };
                 }
@@ -397,7 +450,14 @@ let _ = e;
                 input, policy, tool_name, &tool_input, "approve", Some(rule), start,
             );
             PreToolResult {
-                output: HookOutput::ask(&format!("⚠️ Railguard: {} — requires approval", message)),
+                output: HookOutput::ask(&format!(
+                    "🛡️ RAILGUARD is asking (not Claude Code's permission system).\n\
+                     \n\
+                     Rule: {} — {}\n\
+                     \n\
+                     This command matched a Railguard policy rule that requires human approval.",
+                    rule, message
+                )),
                 terminate: None,
             }
         }
