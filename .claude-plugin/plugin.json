@@ -1,7 +1,7 @@
 {
   "name": "railguard",
   "description": "A secure runtime for Claude Code. Intercepts every tool call with policy-based allow/block/ask decisions, evasion detection, path fencing, file snapshots, and audit logging.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": {
     "name": "railguard-dev"
   },

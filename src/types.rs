@@ -79,7 +79,7 @@ impl HookOutput {
             hook_specific_output: Some(HookSpecificOutput {
                 hook_event_name: "PreToolUse".to_string(),
                 permission_decision: Some("ask".to_string()),
-                permission_decision_reason: None,
+                permission_decision_reason: Some(context.to_string()),
                 additional_context: Some(context.to_string()),
             }),
         }

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-03-22
+
+### Fixed
+
+- **Approval prompts now visible to the user** — `permissionDecisionReason` was not being set on `ask` responses, so Claude Code showed the generic "Hook requires confirmation" message instead of Railguard's explanation. Now both `permissionDecisionReason` (shown to user) and `additionalContext` (shown to Claude) are set.
+
 ## [0.5.0] - 2026-03-22 — Graceful Fail-Safe
 
 Railguard no longer permanently kills sessions or silently blocks without explanation. Every decision now tells you who's asking, why, and what to do about it.
